@@ -1,0 +1,52 @@
+python: can't open file '/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts/blastp_moad2pdb_negatives_2.py': [Errno 2] No such file or directory
+
+------------------------------------------------------------
+Sender: LSF System <lsfadmin@seas.wustl.edu>
+Subject: Job 1624820: <findpairs> in cluster <SEAS-COMPUTE> Exited
+
+Job <findpairs> was submitted from host <bowmore.seas.wustl.edu> by user <borowsky.jonathan> in cluster <SEAS-COMPUTE> at Thu Mar 24 16:28:57 2022
+Job was executed on host(s) <node109.engr.wustl.edu>, in queue <bowman>, as user <borowsky.jonathan> in cluster <SEAS-COMPUTE> at Thu Mar 24 16:28:57 2022
+</home/research/borowsky.jonathan> was used as the home directory.
+</project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts> was used as the working directory.
+Started at Thu Mar 24 16:28:57 2022
+Terminated at Thu Mar 24 16:28:59 2022
+Results reported at Thu Mar 24 16:28:59 2022
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+#!/bin/sh
+#BSUB -q bowman
+#BSUB -W 120:00
+#BSUB -R "span[ptile=1]"
+#BSUB -J findpairs
+#BSUB -o moad-negatives-%J.log
+#BSUB -e moad-negatives-%J.log
+
+#this script is submitted manually
+
+source /project/bowmore/borowsky.jonathan/anaconda3/bin/activate
+conda activate snakes
+
+python /project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts/blastp_moad2pdb_negatives_2.py
+
+------------------------------------------------------------
+
+Exited with exit code 2.
+
+Resource usage summary:
+
+    CPU time :                                   0.31 sec.
+    Max Memory :                                 -
+    Average Memory :                             -
+    Total Requested Memory :                     -
+    Delta Memory :                               -
+    Max Swap :                                   -
+    Max Processes :                              -
+    Max Threads :                                -
+    Run time :                                   1 sec.
+    Turnaround time :                            2 sec.
+
+The output (if any) is above this job summary.
+
