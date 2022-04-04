@@ -40,9 +40,6 @@ xtal = md.load(f"{directory}/rcsb_pdb/{refprot}.pdb")
 resseq2resi = xtal.top.atom(xtal.top.select(f"resSeq {queryrseq}")[0]).residue.index
 query = msa2rind[refprot][pdb2msa[refprot][resseq2resi]]
 
-print(resseq2resi)
-print(query)
-
 #-------------------------------------------------------------------------------
 #look for proteins with the query residue index and print their PDB IDs for inspection
 
@@ -55,13 +52,3 @@ for x, i in enumerate(resisbyprot):
         prots_with_resi_ligand.append(aligned_prot[x])
 
 print(prots_with_resi_ligand)
-
-
-#trimmings
-
-#resisbyprot = np.load(f"{directory}/outputs-{refprot}.npy", allow_pickle = True)
-#msagenprots = np.load(f"{directory}/msagen-{refprot}.npy", allow_pickle = True)
-
-#prot_all = msagenprots[0]
-#pdb2msa = msagenprots[1][0]
-#msa2rind = msagenprots[1][1]
