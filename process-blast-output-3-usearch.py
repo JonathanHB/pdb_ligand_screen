@@ -3,17 +3,21 @@ import itertools
 
 import os
 import csv
+import pickle
+import re
 
 import mdtraj as md
 
 #directory from which to load and save files
 directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles"
+#moad file directory
+blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pockets/iofiles"
 #serial number of the blast output file to load
 serial_in = 6
 #the index of the protein set in the blast file to use
 #testindex = 0
 #whether to to MSA here or load a previously saved one
-align = True
+align = False
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 
@@ -101,7 +105,7 @@ def getstruct(struct, extant):
 #get the protein residues coordinating the specified ligands
 def getcoordresseqs(xtal, ligand_resns, ligand_rseqs, ligand_nonaq_indices):
 
-    #construct ligand selection query
+    #construct ligand selection
     molecule_queries = []
     for x in ligand_nonaq_indices:
         molecule_queries.append(f"(resname '{ligand_resns[x]}' and resSeq {ligand_rseqs[x]})")
@@ -121,27 +125,69 @@ def getcoordresseqs(xtal, ligand_resns, ligand_rseqs, ligand_nonaq_indices):
 
     return [lining_resseqs, lining_resids]
 
+#get the protein residues coordinating the specified ligands
+def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
+
+    #construct ligand selection query
+    molecule_queries = []
+    for x, e in enumerate(ligand_resns):
+        molecule_queries.append(f"(resname '{e}' and resSeq {ligand_rseqs[x]})")
+
+    ligand_select_str = " or ".join(molecule_queries)
+
+    #get indices of ligand and protein atoms
+    ligand_ai = xtal.top.select(f"{ligand_select_str} and not element H")
+    protein_ai = xtal.top.select("protein and not element H")
+
+    #get indices of ligand-coordinating protein atoms; index 0 indicates the 0th trajectory frame
+    lining_ai = md.compute_neighbors(xtal, cutoff, ligand_ai, haystack_indices=protein_ai, periodic = False)[0]
+
+    #get residue indices and numbers
+    lining_resids = np.unique([xtal.top.atom(i).residue.index for i in lining_ai])    #0-indices of the lining residues in the mdtraj structure
+    lining_resseqs = np.unique([xtal.top.atom(i).residue.resSeq for i in lining_ai])  #rcsb pdb residue numbers of the lining residues
+
+    return [lining_resseqs, lining_resids]
+
+#get structural and biological ligands for getprot()
+def getligs(struct, chain=""):
+
+    #WARNING: The use of --no-check-certificate compromises security
+    #ligand information (contains validity information not found in pdb structure)
+    if struct not in existing_xids_moad:
+        try:
+            os.system(f"wget https://www.bindingmoad.org/files/csv/{struct.lower()}.csv -O {blast_directory}/moad_xml/{struct.lower()}.csv --no-check-certificate")
+            existing_xids_moad.append(struct)
+            #keeps the list of existing xml files up to date for when the code encounters apo candidates which are in moad and were previously loaded as holo candidates
+        except:
+            print(f"{struct} not in moad")
+            return []
+
+    bio_ligands = [] #get all the valid ligands from the moad structure
+
+    chain_elems = chain.split("_")
+
+    with open(f'{blast_directory}/moad_xml/{struct.lower()}.csv') as csvfile:
+        reader = csv.reader(csvfile)
+        firstrow = True
+        for row in reader:
+            if firstrow: #skip first row, which lacks ligand information
+                firstrow = False
+                continue
+
+            contents = row[3].split(":")
+            if (contents[1] in chain_elems or chain == "") and row[4]=="valid":
+            #the latter case (chain == "") is for use of this method in get_struct(),
+            #where it is used to obtain a list of all chains in a pdb structure containing biologically relevant ligands
+                bio_ligands.append(contents)
+
+    return bio_ligands #[keep_ligands, bio_ligands, all_ligands, nst_ligands]
+
 def checkoligomerization(pdbid):
 
     #--------------------------------------------check resolution and break structure into monomeric chains, if any---------------------------------------------------------------------------------------------
 
-    # res_checked = False #make sure the structure contains REMARK 2; might be unnecessary depending on whether it's ever missing
     author_found = False #prevent the software from reading any software-determined-only biomolecules
-    # #if any author-determined ones are present; assumes that the author-determined ones come first
-    # any_chains = False #report if no chains are found
-    # rem350 = False #report if no remark 350 is found
-    #
-    look_for_mer = True #read only the first line after each biomolecule line to avoid reading the
-    # #software-determined biological unit for a given biomolecule if the author-determined one has already been read
-    # look_for_chains = False
-    #
-    # chain_buffer = [] #chains for a single biomolecule are sometimes spread onto multiple lines
-    #
-    # true_type = [] #all apo chains, and holo chains with a biological ligand
-    # false_type = [] #only used for holo chains with no biological (valid) ligand
-    #
-    # lig_chains = [] # [holo] chains containing biological ligands
-
+    look_for_mer = False #read only the first line after each biomolecule line to avoid reading the
 
     for line in open(f"{directory}/rcsb_pdb/{pdbid}.pdb"): #get pdb apo indices
 
@@ -164,49 +210,22 @@ def checkoligomerization(pdbid):
 
         elif look_for_mer and not (line[0:52] == "REMARK 350 SOFTWARE DETERMINED QUATERNARY STRUCTURE:" and author_found):
             print("missing biological unit")
-            #return False
+            return False
 
-        # #compile a list of all pdb-chains in the biological unit and then extract them to a new file
-        # #since non-protein ligands may have their own pdb chains, even monomeric proteins may need to be assembled from multiple chains
-        # if look_for_chains and line[0:41] == "REMARK 350 APPLY THE FOLLOWING TO CHAINS:":
-        #     #beware that on the order of 1/10000 of pdb structures have double spaces before the first chain ID, which this code should tolerate
-        #     pdblist = re.split(',| ', line[41:])
-        #     for i in range(0,len(pdblist)):
-        #         if pdblist[i] != "" and pdblist[i] != "\n":
-        #             chain_buffer.append(pdblist[i])
-        # elif look_for_chains and line[0:19] == "REMARK 350   BIOMT1":
-        #     #chains.append(chain_buffer)
-        #     #extract_chain(struct, type, type, chain_buffer)
-        #     if type == "holo" and set(chain_buffer).isdisjoint(lig_chains): #separate holo monomers with no drug-like ligands and save them as apo structures
-        #         false_type.append('_'.join(chain_buffer))
-        #         #extract_chain(struct, type, "apo", chain_buffer)
-        #         print(f"apo chains from holo structures: {chain_buffer}")
-        #     else:                                                           #save apo monomers and holo monomers with drug-like ligands
-        #         true_type.append('_'.join(chain_buffer))
-        #         #extract_chain(struct, type, type, chain_buffer)
-        #         print(f"regular chains: {chain_buffer}")
-        #
-        #
-        #     look_for_chains = False
-        #     chain_buffer = [] #reset chain list
-        #     any_chains = True
-
-        # look_for_mer = False
-        # #make sure that only the author determined biological unit is read in cases where software and author units disagree
-        # #by ensuring that only the line after the biomolecule line is read to check the unit
-        # if line[0:23] == f"REMARK 350 BIOMOLECULE:": #did not handle variable numbers of spaces well
-        #     look_for_mer = True
-        #     rem350 = True #check that remark 350 exists
+        if line[0:23] == f"REMARK 350 BIOMOLECULE:": # {biomolecule+1} #did not handle variable numbers of spaces well
+            look_for_mer = True
 
 ################################################################################
 #----------------------------------Main loop-----------------------------------#
 ################################################################################
 
 #get a list of already-downloaded structures to avoid downloading extra copies
+existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")] #get a list of already-downloaded ligand lists to avoid downloading extra copies
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 for testindex in range(0, 20):
     testprots = blasthits[testindex]
+
 #------------------------------------------------test muscle msa-----------------------------------------
 
 #compute the msa and save the results
@@ -240,11 +259,15 @@ for testindex in range(0, 20):
         savedict = {
          f"{testprots[0]}-pdb2msa":msagen[0],
          f"{testprots[0]}-msa2rind":msagen[1],
-         f"{testprots[0]}-msa":msagen[2],
-         f"{testprots[0]}-aligned-proteins":prot_all}
+         f"{testprots[0]}-msa":msagen[2]}
 
         for e in savedict.keys():
-            np.save(e, savedict(e))
+            with open(e, "wb") as output_file:
+                pickle.dump(savedict[e], output_file)
+
+        np.save(f"{testprots[0]}-aligned-proteins", prot_all)
+
+
 
         #np.save(f"{directory}/msagen-{testprots[0]}", [prot_all, msagen])
 
@@ -254,8 +277,14 @@ for testindex in range(0, 20):
 
     #load the results of a saved msa
     else:
-        pdb2msa = np.load(f"{testprots[0]}-pdb2msa.npy")
-        msa2rind = np.load(f"{testprots[0]}-msa2rind.npy")
+
+        with open(f"{testprots[0]}-pdb2msa", 'rb') as pickle_file:
+            pdb2msa = pickle.load(pickle_file)
+
+        with open(f"{testprots[0]}-msa2rind", 'rb') as pickle_file:
+            msa2rind = pickle.load(pickle_file)
+        #pdb2msa = pickle.load(f"{testprots[0]}-pdb2msa")
+        #msa2rind = pickle.load(f"{testprots[0]}-msa2rind")
         prot_all = np.load(f"{testprots[0]}-aligned-proteins.npy")
 
         #msagenprots = np.load(f"{directory}/msagen-{testprots[0]}.npy")
@@ -279,46 +308,59 @@ for testindex in range(0, 20):
     for x, prot in enumerate(prot_all):
         print(f"{x}: {prot}")
 
+        #skip multimers
         if not checkoligomerization(prot):
+            lining_resis_byprot.append([-999]) #to distinguish multimers from aligned structures with no MOAD ligands
             continue
 
         xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
 
+        moad_ligands = getligs(prot)
+        moad_resns = [i[0] for i in moad_ligands]
+        moad_rseqs = [int(i[2]) for i in moad_ligands]
+
+        #print(moad_rseqs)
+        #print(moad_ligands)
+
         #skip structures with more than two mdtraj chains
-        if xtal.top.n_chains != 2:
-            #add an entry to the list so that protein numbers stay synchronized with their residue lists
-            #-99 serves to distinguish the entry from empty lists for proteins with no ligands which were still processed successfully
-            lining_resis_byprot.append([-99])
-            print(f"skipping {prot} with {xtal.top.n_chains} chains")
-            continue
+        # if xtal.top.n_chains != 2:
+        #     #add an entry to the list so that protein numbers stay synchronized with their residue lists
+        #     #-99 serves to distinguish the entry from empty lists for proteins with no ligands which were still processed successfully
+        #     lining_resis_byprot.append([-99])
+        #     print(f"skipping {prot} with {xtal.top.n_chains} chains")
+        #     continue
 
         #get the residues of the second mdtraj chain, which should contain the ligand and solvent
-        ligandsolvent = [[j for j in i.residues] for i in xtal.top.chains][1]
+        #ligandsolvent = [[j for j in i.residues] for i in xtal.top.chains][1]
+
 
         #aqueous solvents, gases, and ions which are unlikely to open cryptic pockets,
         #likely to cover most of the surface, or unrepresentative of biological ligands
-        solvent = ["HOH","DOD","NH3","NH4","CO3","NO3","PO4","SO4","LI","BE","K","NA","MG","CA","F","CL","BR","I","ZN","MN","CU","FE","O2","HDZ","CO2","CO2","XE","UNX"]
+        #solvent = ["HOH","DOD","NH3","NH4","CO3","NO3","PO4","SO4","LI","BE","K","NA","MG","CA","F","CL","BR","I","ZN","MN","CU","FE","O2","HDZ","CO2","CO2","XE","UNX"]
 
         #full residue names
-        ligands = [str(i) for i in ligandsolvent]
+        #ligands = [str(i) for i in ligandsolvent]
         #residue pdb numbers
-        ligand_rseqs = [i.resSeq for i in ligandsolvent]
+        #ligand_rseqs = [i.resSeq for i in ligandsolvent]
         #get residue names
-        ligand_resns = [i[0:-len(str(ligand_rseqs[x]))] for x, i in enumerate(ligands)]
+        #ligand_resns = [i[0:-len(str(ligand_rseqs[x]))] for x, i in enumerate(ligands)]
         #indices of residues which are of biological interest (not in the list above)
-        ligand_nonaq_indices = [x for x, i in enumerate(ligand_resns) if i not in solvent]
+        #ligand_nonaq_indices = [x for x, i in enumerate(ligand_resns) if i in moad_ligands] # if i not in solvent]
 
         #skip structures with no ligands of interest
-        if ligand_nonaq_indices != []:
+        if moad_ligands != []:
 
             prot_holo.append(prot)
 
             #get the residues within cutoff distance of the ligand
-            lining_rseqs_resis = getcoordresseqs(xtal, ligand_resns, ligand_rseqs, ligand_nonaq_indices)
+            lining_rseqs_resis = getcoordresseqs_moad(xtal, moad_resns, moad_rseqs)
 
             #separate the returned objects for further processing
             lining_rseqs = lining_rseqs_resis[0] #rcsb pdb numbers
             lining_resis = lining_rseqs_resis[1] #mdtraj residue indices
+
+            #print(lining_resis)
+            #print(lining_rseqs)
 
             #acetylated n-termini cause off-by-one errors when converting residue
             #numbering using the multiple sequence alignment. This if statement
@@ -329,6 +371,11 @@ for testindex in range(0, 20):
 
             #get the indices of the lining residues in the reference structure
             #these are the mdtraj indices
+            #print(pdb2msa.keys())
+            #print(prot)
+            #print(pdb2msa[prot])
+            #print([pdb2msa[prot][i] for i in lining_resis])
+
             lining_aligned = [msa2rind[testprots[0]][pdb2msa[prot][i]] for i in lining_resis
                               if (i in pdb2msa[prot] and pdb2msa[prot][i] in msa2rind[testprots[0]])]
 
@@ -347,27 +394,28 @@ for testindex in range(0, 20):
 
     #reference structure pdb id
     print("-----------------------------------------------------------------------")
-    print(f"resseqs of lining residues in pdb id {testprots[0]}:")
 
-    #load reference structure
+    #load reference structure and extract the 0th chain,
+    #which ought to be protein for any normal structure
     xtal = md.load(f"{directory}/rcsb_pdb/{testprots[0]}.pdb")
     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
 
-    #print pdb resseqs of ligand-lining residues for pymol display
+    #calculate pdb resseqs of ligand-lining residues for pymol display
     output_rseqs_p = [xtal_0.top.residue(i).resSeq for i in lining_resis_all]
     output_rseqs_n = [
         r.resSeq
         for r in xtal_0.top.residues
         if r.index not in lining_resis_all and r.is_protein
     ]
-    #output_resid_p = lining_resis_all
+
+    #calculate indices of negative resiude in reference structure
     output_resid_n = [
         r.index
         for r in xtal_0.top.residues
         if r.index not in lining_resis_all and r.is_protein
     ]
-    #"+".join(str(xtal.top.residue(i).resSeq) for i in lining_resis_all if xtal.top.residue(i).is_protein)]
 
+    #save results
     savedict = {
      f"{testprots[0]}-aligned-proteins":prot_all,
      f"{testprots[0]}-holo-proteins":prot_holo,
@@ -376,24 +424,34 @@ for testindex in range(0, 20):
      f"{testprots[0]}-rseqs-positive":output_rseqs_p,
      f"{testprots[0]}-rseqs-negative":output_rseqs_n,
      f"{testprots[0]}-resid-negative":output_resid_n}
-    #"{testprots[0]}-centroid_pdb_id":testprots[0],
 
     for e in savedict.keys():
-        np.save(e, savedict(e))
+        np.save(e, savedict[e])
 
-    #save results
-    #np.save(f"{directory}/outputs-{testprots[0]}", [testprots[0], prot_all, lining_resis_byprot, lining_resis_all, output_rseqs_p, output_rseqs_n, output_resid_n])
-
-
+    #print negative residues for manual inspection
+    print(f"resseqs of lining residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}")
 
 ################################################################################
-# things to try:
+#                               things to try
+#------------------------------------------------------------------------------#
 
 #try tem and see if we get the horn site and don't get the residues known not to label - done
 #try the sars-2 macrodomain
 #use muscle multiple sequence alignment - done
 #Greg says to try simulating the output - partially done
 
+################################################################################
+
+
+#-------------------------------trimmings---------------------------------------
+
+
+    #"{testprots[0]}-centroid_pdb_id":testprots[0], # <--unnecessary since this is in the filename
+
+
+#output_resid_p = lining_resis_all
+#"+".join(str(xtal.top.residue(i).resSeq) for i in lining_resis_all if xtal.top.residue(i).is_protein)]
+#np.save(f"{directory}/outputs-{testprots[0]}", [testprots[0], prot_all, lining_resis_byprot, lining_resis_all, output_rseqs_p, output_rseqs_n, output_resid_n])
 
     #if type == "holo":
     #    holo_ligs = getligs(struct, "")

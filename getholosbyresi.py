@@ -1,32 +1,67 @@
-#get the proteins in which a particular residue (numbered based on the reference structure) are within 5A or a ligand
 import sys
-queryrseq = sys.argv[1]
-
-refprot = "12CA"
-
+import pickle
 import numpy as np
-directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles"
-resisbyprot = np.load(f"{directory}/outputs-{refprot}.npy")
-
-msagenprots = np.load(f"{directory}/msagen-{refprot}.npy")
-
-prot_all = msagenprots[0]
-pdb2msa = msagenprots[1][0]
-msa2rind = msagenprots[1][1]
-
 import mdtraj as md
-xtal = md.load(f"{directory}/rcsb_pdb/{refprot}.pdb")
-resseq2resi = xtal.top.atom(xtal.top.select(f"resSeq {queryrseq}")[0]).residue.index
-print(resseq2resi)
 
+################################################################################
+#return PDB IDs of the proteins in which a particular residue
+#(numbered based on the centroid/reference structure) are within 5A or a ligand
+################################################################################
+
+#-------------------------------arguments---------------------------------------
+#take the first argument as the centroid protein of interest
+refprot = sys.argv[1]
+#take the second argument as the query pdb residue number
+queryrseq = sys.argv[2]
+
+#-------------------------------static parameters-------------------------------
+#directory containing protein lists
+directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles"
+
+#--------------------------load processed blast outputs-------------------------
+#list of proteins in the cluster of the argument centroid
+aligned_prot = np.load(f"{refprot}-aligned-proteins.npy")
+
+#ligand-lining residues by protein
+resisbyprot = np.load(f"{refprot}-lining-resis-byprot.npy")
+
+#dictionaries needed to convert between resseqs and residue indices (via msa indices)
+with open(f"{refprot}-pdb2msa", 'rb') as pickle_file:
+    pdb2msa = pickle.load(pickle_file)
+
+with open(f"{refprot}-msa2rind", 'rb') as pickle_file:
+    msa2rind = pickle.load(pickle_file)
+
+#centroid crystal structure
+xtal = md.load(f"{directory}/rcsb_pdb/{refprot}.pdb")
+
+#-------------------------------------------------------------------------------
+#convert the argument pdb residue to a centroid structure residue index
+resseq2resi = xtal.top.atom(xtal.top.select(f"resSeq {queryrseq}")[0]).residue.index
 query = msa2rind[refprot][pdb2msa[refprot][resseq2resi]]
+
+print(resseq2resi)
 print(query)
 
-prots_with_resi_ligand = [] #proteins with a ligand near the query residue
+#-------------------------------------------------------------------------------
+#look for proteins with the query residue index and print their PDB IDs for inspection
 
-for x, i in enumerate(resisbyprot[1]):
+#proteins with a ligand near the query residue
+prots_with_resi_ligand = []
+
+for x, i in enumerate(resisbyprot):
     #print(i)
     if query in i:
-        prots_with_resi_ligand.append(resisbyprot[0][x])
+        prots_with_resi_ligand.append(aligned_prot[x])
 
 print(prots_with_resi_ligand)
+
+
+#trimmings
+
+#resisbyprot = np.load(f"{directory}/outputs-{refprot}.npy", allow_pickle = True)
+#msagenprots = np.load(f"{directory}/msagen-{refprot}.npy", allow_pickle = True)
+
+#prot_all = msagenprots[0]
+#pdb2msa = msagenprots[1][0]
+#msa2rind = msagenprots[1][1]
