@@ -17,7 +17,7 @@ serial_in = 6
 #the index of the protein set in the blast file to use; deprecated due to loop
 #testindex = 0
 #whether to to MSA here or load a previously saved one
-align = False
+align = True
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 
@@ -32,14 +32,14 @@ import mdtraj as md
 import numpy as np
 from skbio import Protein, TabularMSA
 
-def generate_msa(trajectories, protein_names, version='new'):
+def generate_msa(trajectories, protein_names, centroid_id, version='new'):
     '''
         trajectories : mdtraj trajectories for which you wish to do the sequence alignment.
             Code assumes that you will supply only one protein chain
 
     '''
     input_sequences = {}
-    with open('alignment.fasta', 'w') as f:
+    with open(f'{centroid_id}-alignment.fasta', 'w') as f:
         for p, pdb in zip(protein_names, trajectories):
             prot = Protein(
                 ''.join(r.code for r in pdb.top.residues if r.code),
@@ -48,15 +48,15 @@ def generate_msa(trajectories, protein_names, version='new'):
             input_sequences[p] = str(prot)
 
     muscledir = "/project/bowmore/ameller/"
-    if version == 'old':
+
+    if version == 'old': #deprecated; could be removed
         os.system(f'{muscledir}muscle -in alignment.fasta -out alignment-aligned.fasta')
         os.system(f'{muscledir}muscle -refine -in alignment-aligned.fasta -out alignment-refined.fasta')
         msa = TabularMSA.read('alignment-refined.fasta',
                               constructor=Protein)
     else:
-        os.system(f'{muscledir}muscle -align alignment.fasta -output alignment-aligned.fasta')
-        msa = TabularMSA.read('alignment-aligned.fasta',
-                              constructor=Protein)
+        os.system(f'{muscledir}muscle -align {centroid_id}-alignment.fasta -output {centroid_id}-alignment-aligned.fasta')
+        msa = TabularMSA.read(f'{centroid_id}-alignment-aligned.fasta', constructor=Protein)
 
     msa.reassign_index(minter='id')
 
@@ -104,7 +104,7 @@ def getstruct(struct, extant):
 
 #get the protein residues coordinating the specified ligands
 #the prot argument is for debugging
-def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs, prot):
+def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
 
     #construct ligand selection query
     molecule_queries = []
@@ -161,8 +161,6 @@ def getligs(struct, chain=""):
     return bio_ligands #[keep_ligands, bio_ligands, all_ligands, nst_ligands]
 
 def checkoligomerization(pdbid):
-
-    #--------------------------------------------check resolution and break structure into monomeric chains, if any---------------------------------------------------------------------------------------------
 
     author_found = False #prevent the software from reading any software-determined-only biomolecules
     look_for_mer = False #read only the first line after each biomolecule line to avoid reading the
@@ -229,7 +227,7 @@ for testindex in range(0, 20):
                     print(f"error loading {prot}")
 
         #generate and save the msa
-        msagen = generate_msa(xtal_all, prot_all)
+        msagen = generate_msa(xtal_all, prot_all, testprots[0])
 
         savedict = {
          f"{testprots[0]}-pdb2msa":msagen[0],
@@ -286,7 +284,7 @@ for testindex in range(0, 20):
             prot_holo.append(prot)
 
             #get the residues within cutoff distance of the ligand
-            lining_rseqs_resis = getcoordresseqs_moad(xtal, moad_resns, moad_rseqs, prot)
+            lining_rseqs_resis = getcoordresseqs_moad(xtal, moad_resns, moad_rseqs)
 
             #separate the returned objects for further processing
             lining_rseqs = lining_rseqs_resis[0] #rcsb pdb numbers
@@ -355,7 +353,7 @@ for testindex in range(0, 20):
         np.save(e, savedict[e])
 
     #print negative residues for manual inspection
-    print(f"resseqs of lining residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}")
+    print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}")
 
 ################################################################################
 #                               things to try

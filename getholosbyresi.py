@@ -10,7 +10,7 @@ import mdtraj as md
 
 #-------------------------------arguments---------------------------------------
 #take the first argument as the centroid protein of interest
-refprot = sys.argv[1]
+refprot = sys.argv[1].upper()
 #take the second argument as the query pdb residue number
 queryrseq = sys.argv[2]
 
