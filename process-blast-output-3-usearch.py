@@ -219,6 +219,10 @@ for testindex in range(0, len(blasthits)):
         xtal_all = []
         prot_aligned = []
 
+        #track the total number of loadable proteins and the number which are physiological multimers
+        all_loadable = 0
+        physio_multimer = 0
+
         #loop through all proteins collected by BLAST
         for x, prot in enumerate(testprots[1]):
             print(f"{x}: {prot}")
@@ -231,7 +235,9 @@ for testindex in range(0, len(blasthits)):
                     #skip multimers
                     if not checkoligomerization(prot):
                         print(f"skipping physiological multimer {prot}")
+                        physio_multimer+=1
                         continue
+                    all_loadable +=1
 
                     xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
                     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
@@ -259,6 +265,7 @@ for testindex in range(0, len(blasthits)):
                 pickle.dump(savedict[e], output_file)
 
         np.save(f"{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
+        np.save(f"{testprots[0]}-v{serial_out}-multimer-fraction", [physio_multimer/all_loadable, all_loadable, physio_multimer])
 
         #separate the returned objects for further processing
         pdb2msa = msagen[0]
@@ -294,16 +301,21 @@ for testindex in range(0, len(blasthits)):
     lining_resis_all_msa = [] #pooled list of all msa lining residue indices
     lining_resis_byprot_msa = [] #msa lining residue indices by source protein
 
+    #track all ligands encountered to determine the number of unique ligands
+    all_moad_ligands = []
+
     #loop through all proteins collected by BLAST and included in the MSA
     for x, prot in enumerate(prot_aligned):
         print(f"{x}: {prot}")
 
         xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
 
-        #format ligand query
+        #extract moad ligand residue types and ids for neighbor calculations
         moad_ligands = getligs(prot)
         moad_resns = [i[0] for i in moad_ligands]
         moad_rseqs = [int(i[2]) for i in moad_ligands]
+
+        all_moad_ligands.append(moad_resns)
 
         #skip structures with no ligands of interest
         if moad_ligands != []:
@@ -353,10 +365,23 @@ for testindex in range(0, len(blasthits)):
     lining_resis_all_msa = np.unique(lining_resis_all_msa)
 
 
-    #-------------------------------outputs-----------------------------------------
+    #-------------------------------outputs---------------------------------------------------------
+    print("-------------------------results----------------------------------------------")
 
-    #reference structure pdb id
-    print("-----------------------------------------------------------------------")
+    #-------------------------------ligand composition and uniqueness-------------------------------
+
+    ligand_summary = [all_moad_ligands, len(np.unique(all_moad_ligands)), len(all_moad_ligands), len(np.unique(all_moad_ligands))/len(moad_ligands)]
+
+    #-------------------------------positive examples for training----------------------------------
+
+    #get the mdtraj residue indices of positive residues for each protein from the MSA
+    resids_byprot_p = []
+
+    for x, prot in enumerate(prot_aligned):
+        lining_resids_prot = [msa2rind[prot][e] for e in lining_resis_all_msa if e in msa2rind[prot]]
+        resids_byprot_p.append([prot, lining_resids_prot])
+
+    #-------------------------------negative examples for validation and testing--------------------
 
     #load reference structure and extract the 0th chain,
     #which ought to be protein for any normal structure
@@ -371,14 +396,14 @@ for testindex in range(0, len(blasthits)):
         if r.index not in lining_resis_all and r.is_protein
     ]
 
-    #calculate indices of negative resiude in reference structure
+    #calculate indices of negative resiudes in reference structure
     output_resid_n = [
         r.index
         for r in xtal_0.top.residues
         if r.index not in lining_resis_all and r.is_protein
     ]
 
-    #save results
+    #--------------------------------save results---------------------------------------------------
 
     #variables to save and variable-specific filenames
     savedict = {
@@ -388,7 +413,9 @@ for testindex in range(0, len(blasthits)):
      f"lining-resis-all":lining_resis_all,
      f"rseqs-positive":output_rseqs_p,
      f"rseqs-negative":output_rseqs_n,
-     f"resid-negative":output_resid_n}
+     f"resid-negative":output_resid_n,
+     f"resid-positive-byprot":resids_byprot_p,
+     f"ligand-summary":ligand_summary}
 
     for e in savedict.keys():
         np.save(f"{testprots[0]}-v{serial_out}-{e}", savedict[e])
