@@ -7,6 +7,7 @@ import pickle
 import re
 
 import mdtraj as md
+from skbio import Protein, TabularMSA
 
 #directory from which to load and save files
 directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles"
@@ -14,23 +15,25 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_nega
 blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pockets/iofiles"
 #serial number of the blast output file to load
 serial_in = 6
-#the index of the protein set in the blast file to use; deprecated due to loop
-#testindex = 0
 #whether to to MSA here or load a previously saved one
 align = True
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
+#used to distinguish different versions of the results
+#(i.e. results computed with different cluster sequence identity cutoffs)
+serial_out = 2
 
 #load BLAST hits and pull out the set of interest
 blasthits = np.load(f"{directory}/blast_output_v{serial_in}.npy")
 
-#-----------------------------------MUSCLE multiple sequence alignment code from Artur-----------------------------------#
-#import this if possible rather than copying it here
 
-import os
-import mdtraj as md
-import numpy as np
-from skbio import Protein, TabularMSA
+#-----------------------------------MUSCLE multiple sequence alignment code from Artur-----------------------------------#
+#import this if possible rather than copying it here; imports
+
+#import os
+#import mdtraj as md
+#import numpy as np
+#from skbio import Protein, TabularMSA
 
 def generate_msa(trajectories, protein_names, centroid_id, version='new'):
     '''
@@ -126,7 +129,7 @@ def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
 
     return [lining_resseqs, lining_resids]
 
-#get structural and biological ligands for getprot()
+#get biological ligands from MOAD
 def getligs(struct, chain=""):
 
     #WARNING: The use of --no-check-certificate compromises security
@@ -158,8 +161,9 @@ def getligs(struct, chain=""):
             #where it is used to obtain a list of all chains in a pdb structure containing biologically relevant ligands
                 bio_ligands.append(contents)
 
-    return bio_ligands #[keep_ligands, bio_ligands, all_ligands, nst_ligands]
+    return bio_ligands
 
+#separate biological monomers from multimers
 def checkoligomerization(pdbid):
 
     author_found = False #prevent the software from reading any software-determined-only biomolecules
@@ -185,21 +189,26 @@ def checkoligomerization(pdbid):
             print("missing biological unit")
             return False
 
-        if line[0:23] == f"REMARK 350 BIOMOLECULE:": # {biomolecule+1} #did not handle variable numbers of spaces well
+        if line[0:23] == f"REMARK 350 BIOMOLECULE:":
             look_for_mer = True
 
 ################################################################################
 #----------------------------------Main loop-----------------------------------#
 ################################################################################
 
+#residues that cause problems:
+#[DMO?? (not the PDB name), MLY, SUI]
+
 #get a list of already-downloaded structures to avoid downloading extra copies
 existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")] #get a list of already-downloaded ligand lists to avoid downloading extra copies
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
-for testindex in range(0, 20):
+for testindex in range(0, len(blasthits)):
     testprots = blasthits[testindex]
+    print("===============================================================================")
+    print(f"cluster {testindex}, centroid {testprots[0]}")
 
-#------------------------------------------------test muscle msa-----------------------------------------
+#------------------------------------------------muscle msa-----------------------------------------
 
     #compute the msa and save the results
     if align == True:
@@ -208,7 +217,7 @@ for testindex in range(0, 20):
 
         #get lists of crystal structures and pdb ids for MSA
         xtal_all = []
-        prot_all = []
+        prot_aligned = []
 
         #loop through all proteins collected by BLAST
         for x, prot in enumerate(testprots[1]):
@@ -219,26 +228,37 @@ for testindex in range(0, 20):
 
                 #load the protein structure and get the first chain; skip the protein if this fails
                 try:
+                    #skip multimers
+                    if not checkoligomerization(prot):
+                        print(f"skipping physiological multimer {prot}")
+                        continue
+
                     xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
                     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
+
                     xtal_all.append(xtal_0)
-                    prot_all.append(prot)
+                    prot_aligned.append(prot)
                 except:
                     print(f"error loading {prot}")
 
+        #throw out clusters with no valid structures
+        if len(prot_aligned) == 0:
+            print("no valid structures found, skipping to next usearch cluster")
+            continue
+
         #generate and save the msa
-        msagen = generate_msa(xtal_all, prot_all, testprots[0])
+        msagen = generate_msa(xtal_all, prot_aligned, testprots[0])
 
         savedict = {
-         f"{testprots[0]}-pdb2msa":msagen[0],
-         f"{testprots[0]}-msa2rind":msagen[1],
-         f"{testprots[0]}-msa":msagen[2]}
+         f"pdb2msa":msagen[0],
+         f"msa2rind":msagen[1],
+         f"msa":msagen[2]}
 
         for e in savedict.keys():
-            with open(e, "wb") as output_file:
+            with open(f"{testprots[0]}-v{serial_out}-{e}", "wb") as output_file:
                 pickle.dump(savedict[e], output_file)
 
-        np.save(f"{testprots[0]}-aligned-proteins", prot_all)
+        np.save(f"{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
 
         #separate the returned objects for further processing
         pdb2msa = msagen[0]
@@ -253,27 +273,34 @@ for testindex in range(0, 20):
         with open(f"{testprots[0]}-msa2rind", 'rb') as pickle_file:
             msa2rind = pickle.load(pickle_file)
 
-        prot_all = np.load(f"{testprots[0]}-aligned-proteins.npy")
+        prot_aligned = np.load(f"{testprots[0]}-aligned-proteins.npy")
 
-    #------------------------------------------------test muscle msa end-------------------------------------
+    #------------------------------------------------muscle msa end-------------------------------------
 
-    #lining residues = residues near ligands
+    #set reference protein to the centroid,
+    #or the first protein (in alphabetic order) if the centroid is unavailable
+    if testprots[0] in prot_aligned:
+        refprot = testprots[0]
+    else:
+        refprot = prot_aligned[0]
+
+    #note: lining residues = residues near ligands
     prot_holo = [] #all proteins with relevant ligands
+
+    #reference structure indices
     lining_resis_all = [] #pooled list of all rind2msa reference structure lining residues
-    lining_resis_byprot = [] #rcsb pdb lining residue numbers by source protein
+    lining_resis_byprot = [] #rcsb pdb lining residue indices in the reference structure by source protein
+    #msa indices
+    lining_resis_all_msa = [] #pooled list of all msa lining residue indices
+    lining_resis_byprot_msa = [] #msa lining residue indices by source protein
 
     #loop through all proteins collected by BLAST and included in the MSA
-
-    for x, prot in enumerate(prot_all):
+    for x, prot in enumerate(prot_aligned):
         print(f"{x}: {prot}")
-
-        #skip multimers
-        if not checkoligomerization(prot):
-            lining_resis_byprot.append([-999]) #to distinguish multimers from aligned structures with no MOAD ligands
-            continue
 
         xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
 
+        #format ligand query
         moad_ligands = getligs(prot)
         moad_resns = [i[0] for i in moad_ligands]
         moad_rseqs = [int(i[2]) for i in moad_ligands]
@@ -297,22 +324,34 @@ for testindex in range(0, 20):
                 print("shifting residue numbering by one to correct for N-terminal acetylation")
                 lining_resis = [i+1 for i in lining_resis]
 
+            #convert indices using msa
+
+            #get the indices of the lining residues in the msa
+            lining_aligned_msa = [pdb2msa[prot][i] for i in lining_resis if i in pdb2msa[prot]]
+
             #get the indices of the lining residues in the reference structure
             #these are the mdtraj indices
-
-            lining_aligned = [msa2rind[testprots[0]][pdb2msa[prot][i]] for i in lining_resis
-                              if (i in pdb2msa[prot] and pdb2msa[prot][i] in msa2rind[testprots[0]])]
+            lining_aligned = [msa2rind[refprot][pdb2msa[prot][i]] for i in lining_resis
+                              if (i in pdb2msa[prot] and pdb2msa[prot][i] in msa2rind[refprot])]
 
             #append indices for output
+            #reference structure indices
+            lining_resis_all += lining_aligned
+            lining_resis_byprot.append(lining_aligned)
+            #msa indices
             lining_resis_all += lining_aligned
             lining_resis_byprot.append(lining_aligned)
 
         #append empty arrays for structures with no ligands of interest
         else:
+            print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
             lining_resis_byprot.append([])
+            lining_resis_byprot_msa.append([])
 
     #remove duplicate residue indices
     lining_resis_all = np.unique(lining_resis_all)
+    lining_resis_all_msa = np.unique(lining_resis_all_msa)
+
 
     #-------------------------------outputs-----------------------------------------
 
@@ -321,7 +360,7 @@ for testindex in range(0, 20):
 
     #load reference structure and extract the 0th chain,
     #which ought to be protein for any normal structure
-    xtal = md.load(f"{directory}/rcsb_pdb/{testprots[0]}.pdb")
+    xtal = md.load(f"{directory}/rcsb_pdb/{refprot}.pdb")
     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
 
     #calculate pdb resseqs of ligand-lining residues for pymol display
@@ -340,20 +379,22 @@ for testindex in range(0, 20):
     ]
 
     #save results
+
+    #variables to save and variable-specific filenames
     savedict = {
-     f"{testprots[0]}-aligned-proteins":prot_all,
-     f"{testprots[0]}-holo-proteins":prot_holo,
-     f"{testprots[0]}-lining-resis-byprot":lining_resis_byprot,
-     f"{testprots[0]}-lining-resis-all":lining_resis_all,
-     f"{testprots[0]}-rseqs-positive":output_rseqs_p,
-     f"{testprots[0]}-rseqs-negative":output_rseqs_n,
-     f"{testprots[0]}-resid-negative":output_resid_n}
+     f"aligned-proteins":prot_aligned,
+     f"holo-proteins":prot_holo,
+     f"lining-resis-byprot":lining_resis_byprot,
+     f"lining-resis-all":lining_resis_all,
+     f"rseqs-positive":output_rseqs_p,
+     f"rseqs-negative":output_rseqs_n,
+     f"resid-negative":output_resid_n}
 
     for e in savedict.keys():
-        np.save(e, savedict[e])
+        np.save(f"{testprots[0]}-v{serial_out}-{e}", savedict[e])
 
     #print negative residues for manual inspection
-    print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}")
+    print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}\n")
 
 ################################################################################
 #                               things to try
@@ -368,3 +409,12 @@ for testindex in range(0, 20):
 ################################################################################
 #                                 trimmings
 #------------------------------------------------------------------------------#
+
+
+ # {biomolecule+1} #did not handle variable numbers of spaces well
+#[keep_ligands, bio_ligands, all_ligands, nst_ligands]
+
+# lining_resis_byprot.append([-999]) #-999 is there to distinguish multimers from aligned structures with no MOAD ligands
+
+#the index of the protein set in the blast file to use; deprecated due to loop
+#testindex = 0

@@ -6,13 +6,15 @@ import Bio.Blast
 from Bio.Blast import NCBIXML
 
 #---------------------------------usearch commands------------------------------
-#these commands were run to generate the input files for this script
+#these commands were run locally over the mount to generate the input files for this script
 
 #combine FASTA files from MOAD (https://www.bindingmoad.org/Home/download)
 #find ../new_pockets/iofiles/rcsb_fasta_all -type f -exec cat {} \; > moad_fasta_all
 
 #cluster MOAD proteins in sequence space to 95% identity and return the centroids
-#make sure to add usearch to the PATH first
+#make sure to add usearch to the PATH first (
+#export PATH=$PATH:/home/jonathanb/software/usearch11.0.667_i86linux32
+#)
 #usearch11.0.667_i86linux32 -cluster_fast moad_fasta_all -id 0.95 -centroids moad_fasta_centroids
 #to save an msa file for each cluster add -msaout [filename stem]
 #this is still very fast
@@ -32,7 +34,7 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pocke
 
 part = "all" #part a or b or both ("all") of the MOAD database, which is broken in two on account of its large size
 
-idthresh = 0.95
+idthresh = 0.90
 
 #get the PDB IDs of all the MOAD structures
 structures = np.hstack([np.unique([i[0:4].upper() for i in os.listdir(f"{directory}/every_part_a/BindingMOAD_2020/")]), np.unique([i[0:4].upper() for i in os.listdir(f"{directory}/every_part_b/BindingMOAD_2020/")])])
@@ -46,10 +48,8 @@ hits_alldata = []
 
 debugcounter = 0
 
-#structures = ["1YV3"]
-
-#loop through moad structures
-for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/centroid_pdb_ids", 'r'):
+#loop through centroid structures
+for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/centroid_pdb_ids_p90", 'r'):
 #for i in structures:
 
     i = i[0:4] #remove \n from each line
@@ -111,8 +111,13 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
 
             entries = re.split("pdb\||>pdb\|", alignment.title) #separate out all pdb files with a given sequence
             pdb_ids = [title[0:4] for title in entries[1:]] #the first entry is "" from the left of the first pdb| header
-            hits = hits+pdb_ids
+            #print(len(pdb_ids))
+            pdb_ids = [i for i in pdb_ids if i.upper() in structures]
+            #print(len(pdb_ids))
+            #print("#########################################################################")
 
+
+            hits = hits+pdb_ids
         else:
             #print(len(alignment.hsps))
             #print(hsp.identities/alignment.length)
@@ -136,7 +141,7 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
 
 hits_alldata.sort(key = lambda x: x[2], reverse=True)
 
-serial = 7 #<-- keep updated
+serial = 9 #<-- keep updated
 np.save(f"/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles/blast_output_v{serial}", hits_alldata)
 
 print(hits_alldata)

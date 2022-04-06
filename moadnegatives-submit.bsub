@@ -11,4 +11,4 @@
 source /project/bowmore/borowsky.jonathan/anaconda3/bin/activate
 conda activate snakes
 
-python /project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts/blastp_moad2pdb_2.py
+python /project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts/blastp_moad2pdb_usearch.py
