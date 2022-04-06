@@ -96,7 +96,7 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
     # see https://biopython.org/docs/1.75/api/Bio.Blast.Record.html for documentation
 
     #print(dir(blast_record)) #print a list of the record's contents
-
+    #
     #for each structure aligned to the moad structure
     for alignment in blast_record.alignments:
 
