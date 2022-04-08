@@ -264,13 +264,13 @@ for testindex in range(0, len(blasthits)):
     #load the results of a saved msa
     else:
 
-        with open(f"{testprots[0]}-pdb2msa", 'rb') as pickle_file:
+        with open(f"{testprots[0]}-v{serial_out}-pdb2msa", 'rb') as pickle_file:
             pdb2msa = pickle.load(pickle_file)
 
-        with open(f"{testprots[0]}-msa2rind", 'rb') as pickle_file:
+        with open(f"{testprots[0]}-v{serial_out}-msa2rind", 'rb') as pickle_file:
             msa2rind = pickle.load(pickle_file)
 
-        prot_aligned = np.load(f"{testprots[0]}-aligned-proteins.npy")
+        prot_aligned = np.load(f"{testprots[0]}-v{serial_out}-aligned-proteins.npy")
 
     #------------------------------------------------muscle msa end-------------------------------------
 
@@ -280,6 +280,9 @@ for testindex in range(0, len(blasthits)):
         refprot = testprots[0]
     else:
         refprot = prot_aligned[0]
+
+    #proteins with canonical residues or a single n-terminal acetyl group only
+    protein_canonical = []
 
     #apo = no moad ligand, holo = moad ligand
     #monomer/multimer is assigned from PDB remark 350
@@ -307,6 +310,36 @@ for testindex in range(0, len(blasthits)):
         print(f"{x}: {prot}")
 
         xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
+
+        #skip proteins with nonstandard residues because these mess up the MSA
+
+        aa_resns = ["ASN", "ASP", "GLN", "GLU", "THR",
+                    "SER", "LYS", "ARG", "HIS", "PRO",
+                    "GLY", "CYS", "MET", "ALA", "VAL",
+                    "LEU", "ILE", "PHE", "TYR", "TRP",
+                    "SEC", "MSE"]
+
+        #get the residues of the first mdtraj chain, which should be protein
+        #this is not robust against weird chain orderings
+        proteinresidues = [[j for j in i.residues] for i in xtal.top.chains][0]
+
+        #full residue names
+        residues = [str(i) for i in proteinresidues]
+        #residue pdb numbers
+        prot_rseqs = [i.resSeq for i in proteinresidues]
+        #get residue names
+        prot_resns = [i[0:-len(str(prot_rseqs[x]))] for x, i in enumerate(residues)]
+        #noncanonical residues
+        prot_resns_noncanonical = [i for i in prot_resns if i not in aa_resns]
+
+        #check if the protein has noncanonical residues other than one n-terminal acetyl group
+        if len(prot_resns_noncanonical > 0) or (len(prot_resns_noncanonical) == 1 and str(xtal.top.residue(0))[0:3] == "ACE"):
+            print("heresy alert: skipping protein due to noncanonical residues:")
+            print(prot_resns_noncanonical)
+            continue
+
+
+        protein_canonical.append(prot)
 
         #extract moad ligand residue types and ids for neighbor calculations
         moad_ligands = getligs(prot)
@@ -345,10 +378,10 @@ for testindex in range(0, len(blasthits)):
             #append indices for output
             #reference structure indices
             lining_resis_all += lining_aligned
-            lining_resis_byprot.append(lining_aligned)
+            lining_resis_byprot[prot] = lining_aligned
             #msa indices
-            lining_resis_all += lining_aligned
-            lining_resis_byprot.append(lining_aligned)
+            lining_resis_all_msa += lining_aligned_msa
+            lining_resis_byprot_msa[prot] = lining_aligned_msa
 
             if checkoligomerization(prot):
                 physio_monomer+=1
@@ -358,10 +391,10 @@ for testindex in range(0, len(blasthits)):
 
         #append empty arrays for structures with no ligands of interest
         else:
+            #print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
 
             prot_apo.append(prot)
 
-            #print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
             lining_resis_byprot[prot] = []
             lining_resis_byprot_msa[prot] = []
 
@@ -381,8 +414,7 @@ for testindex in range(0, len(blasthits)):
 
     #-------------------------------oligomerization info--------------------------------------------
 
-    #np.save(f"{testprots[0]}-v{serial_out}-multimer-fraction",
-    multimer_summary = [all_loadable, physio_multimer, physio_multimer/all_loadable]
+    multimer_summary = [all_loadable, physio_monomer, physio_monomer/all_loadable]
 
     #-------------------------------ligand composition and uniqueness-------------------------------
 
@@ -397,7 +429,7 @@ for testindex in range(0, len(blasthits)):
         lining_resids_prot = [msa2rind[prot][e] for e in lining_resis_all_msa if e in msa2rind[prot]]
         resids_byprot_p.append([prot, lining_resids_prot])
 
-    #-------------------------------negative examples for validation and testing--------------------
+    #-------------------------------negative examples projected onto for validation and testing--------------------
 
     #load reference structure and extract the 0th chain,
     #which ought to be protein for any normal structure
@@ -423,14 +455,22 @@ for testindex in range(0, len(blasthits)):
 
     #variables to save and variable-specific filenames
     savedict = {
-     #f"aligned-proteins":prot_aligned, #already saved
-     f"holo-proteins":prot_holo,
-     f"lining-resis-byprot":lining_resis_byprot,
-     f"lining-resis-all":lining_resis_all,
-     f"rseqs-positive":output_rseqs_p,
-     f"rseqs-negative":output_rseqs_n,
-     f"resid-negative":output_resid_n,
-     f"resid-positive-byprot":resids_byprot_p,
+     "holo-proteins":prot_holo,
+     "canonical-proteins":protein_canonical,
+     "holo-monomer":prot_holo_monomer,
+     "apo-monomer":prot_apo_monomer,
+     "lining-resis-byprot":lining_resis_byprot,
+     "lining-resis-byprot":lining_resis_byprot_msa,
+     "lining-resis-all":lining_resis_all,
+     "lining-resis-all_msa":lining_resis_all_msa,
+     "rseqs-positive_cent":centroid_rseqs_p,
+     "rseqs-negative_cent":centroid_rseqs_n,
+     "resid-negative_cent":centroid_resid_n,
+     "rseqs-positive_apos":output_rseqs_p,
+     "rseqs-negative_apos":output_rseqs_n,
+     "resid-negative_apos":output_resid_n,
+     "resid-positive-byprot":resids_byprot_p,
+
      f"ligand-summary":ligand_summary,
      f"multimer-summary":multimer_summary}
 
@@ -454,8 +494,20 @@ for testindex in range(0, len(blasthits)):
 #                                 trimmings
 #------------------------------------------------------------------------------#
 
-"""
 
+        #indices of residues which are of biological interest (not in the list above)
+        #ligand_nonaq_indices = [x for x, i in enumerate(ligand_resns) if i not in solvent]
+
+     #f"aligned-proteins":prot_aligned, #already saved
+
+
+"""
+            #acetylated n-termini cause off-by-one errors when converting residue
+            #numbering using the multiple sequence alignment. This if statement
+            #detects them and adjusts the numbering by 1 to correct this
+            if str(xtal.top.residue(0))[0:3] == "ACE":
+                print("shifting residue numbering by one to correct for N-terminal acetylation")
+                lining_resis = [i+1 for i in lining_resis]
 """
 
  # {biomolecule+1} #did not handle variable numbers of spaces well
