@@ -14,7 +14,7 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_nega
 #moad file directory
 blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pockets/iofiles"
 #serial number of the blast output file to load
-serial_in = 6
+serial_in = 6 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
 align = True
 #the distance below which ligands are considered adjacent to residues
@@ -41,6 +41,9 @@ def generate_msa(trajectories, protein_names, centroid_id, version='new'):
             Code assumes that you will supply only one protein chain
 
     '''
+
+    #check for selenocysteine here
+
     input_sequences = {}
     with open(f'{centroid_id}-alignment.fasta', 'w') as f:
         for p, pdb in zip(protein_names, trajectories):
@@ -216,12 +219,8 @@ for testindex in range(0, len(blasthits)):
         print("aligning sequences")
 
         #get lists of crystal structures and pdb ids for MSA
-        xtal_all = []
+        xtal_aligned = []
         prot_aligned = []
-
-        #track the total number of loadable proteins and the number which are physiological multimers
-        all_loadable = 0
-        physio_multimer = 0
 
         #loop through all proteins collected by BLAST
         for x, prot in enumerate(testprots[1]):
@@ -230,19 +229,11 @@ for testindex in range(0, len(blasthits)):
             #download the protein structure, skip further processing if this fails
             if getstruct(prot, existing_pdbids) != False:
 
-                #load the protein structure and get the first chain; skip the protein if this fails
-                try:
-                    #skip multimers
-                    if not checkoligomerization(prot):
-                        print(f"skipping physiological multimer {prot}")
-                        physio_multimer+=1
-                        continue
-                    all_loadable +=1
-
+                try: #<----what is this try/except for??
                     xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
                     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
 
-                    xtal_all.append(xtal_0)
+                    xtal_aligned.append(xtal_0)
                     prot_aligned.append(prot)
                 except:
                     print(f"error loading {prot}")
@@ -253,7 +244,7 @@ for testindex in range(0, len(blasthits)):
             continue
 
         #generate and save the msa
-        msagen = generate_msa(xtal_all, prot_aligned, testprots[0])
+        msagen = generate_msa(xtal_aligned, prot_aligned, testprots[0])
 
         savedict = {
          f"pdb2msa":msagen[0],
@@ -265,7 +256,6 @@ for testindex in range(0, len(blasthits)):
                 pickle.dump(savedict[e], output_file)
 
         np.save(f"{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
-        np.save(f"{testprots[0]}-v{serial_out}-multimer-fraction", [physio_multimer/all_loadable, all_loadable, physio_multimer])
 
         #separate the returned objects for further processing
         pdb2msa = msagen[0]
@@ -291,18 +281,26 @@ for testindex in range(0, len(blasthits)):
     else:
         refprot = prot_aligned[0]
 
-    #note: lining residues = residues near ligands
-    prot_holo = [] #all proteins with relevant ligands
+    #apo = no moad ligand, holo = moad ligand
+    #monomer/multimer is assigned from PDB remark 350
+    prot_holo_monomer = []
+    prot_apo_monomer = []
+    prot_holo_multimer = []
+    prot_apo_multimer = []
 
+    #note: lining residues = residues near ligands
     #reference structure indices
     lining_resis_all = [] #pooled list of all rind2msa reference structure lining residues
-    lining_resis_byprot = [] #rcsb pdb lining residue indices in the reference structure by source protein
+    lining_resis_byprot = {} #rcsb pdb lining residue indices in the reference structure by source protein
     #msa indices
     lining_resis_all_msa = [] #pooled list of all msa lining residue indices
-    lining_resis_byprot_msa = [] #msa lining residue indices by source protein
+    lining_resis_byprot_msa = {} #msa lining residue indices by source protein
 
     #track all ligands encountered to determine the number of unique ligands
     all_moad_ligands = []
+
+    #track the fraction of proteins which are monomers
+    physio_monomers = 0
 
     #loop through all proteins collected by BLAST and included in the MSA
     for x, prot in enumerate(prot_aligned):
@@ -319,8 +317,6 @@ for testindex in range(0, len(blasthits)):
 
         #skip structures with no ligands of interest
         if moad_ligands != []:
-
-            prot_holo.append(prot)
 
             #get the residues within cutoff distance of the ligand
             lining_rseqs_resis = getcoordresseqs_moad(xtal, moad_resns, moad_rseqs)
@@ -354,11 +350,26 @@ for testindex in range(0, len(blasthits)):
             lining_resis_all += lining_aligned
             lining_resis_byprot.append(lining_aligned)
 
+            if checkoligomerization(prot):
+                physio_monomer+=1
+                prot_holo_monomer.append(prot)
+            else:
+                prot_holo_multimer.append(prot)
+
         #append empty arrays for structures with no ligands of interest
         else:
-            print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
-            lining_resis_byprot.append([])
-            lining_resis_byprot_msa.append([])
+
+            prot_apo.append(prot)
+
+            #print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
+            lining_resis_byprot[prot] = []
+            lining_resis_byprot_msa[prot] = []
+
+            if checkoligomerization(prot):
+                physio_monomer+=1
+                prot_apo_monomer.append(prot)
+            else:
+                prot_apo_multimer.append(prot)
 
     #remove duplicate residue indices
     lining_resis_all = np.unique(lining_resis_all)
@@ -368,9 +379,14 @@ for testindex in range(0, len(blasthits)):
     #-------------------------------outputs---------------------------------------------------------
     print("-------------------------results----------------------------------------------")
 
+    #-------------------------------oligomerization info--------------------------------------------
+
+    #np.save(f"{testprots[0]}-v{serial_out}-multimer-fraction",
+    multimer_summary = [all_loadable, physio_multimer, physio_multimer/all_loadable]
+
     #-------------------------------ligand composition and uniqueness-------------------------------
 
-    ligand_summary = [all_moad_ligands, len(np.unique(all_moad_ligands)), len(all_moad_ligands), len(np.unique(all_moad_ligands))/len(moad_ligands)]
+    ligand_summary = [all_moad_ligands, len(all_moad_ligands), len(np.unique(all_moad_ligands)), len(np.unique(all_moad_ligands))/len(all_moad_ligands)]
 
     #-------------------------------positive examples for training----------------------------------
 
@@ -407,7 +423,7 @@ for testindex in range(0, len(blasthits)):
 
     #variables to save and variable-specific filenames
     savedict = {
-     f"aligned-proteins":prot_aligned,
+     #f"aligned-proteins":prot_aligned, #already saved
      f"holo-proteins":prot_holo,
      f"lining-resis-byprot":lining_resis_byprot,
      f"lining-resis-all":lining_resis_all,
@@ -415,7 +431,8 @@ for testindex in range(0, len(blasthits)):
      f"rseqs-negative":output_rseqs_n,
      f"resid-negative":output_resid_n,
      f"resid-positive-byprot":resids_byprot_p,
-     f"ligand-summary":ligand_summary}
+     f"ligand-summary":ligand_summary,
+     f"multimer-summary":multimer_summary}
 
     for e in savedict.keys():
         np.save(f"{testprots[0]}-v{serial_out}-{e}", savedict[e])
@@ -437,6 +454,9 @@ for testindex in range(0, len(blasthits)):
 #                                 trimmings
 #------------------------------------------------------------------------------#
 
+"""
+
+"""
 
  # {biomolecule+1} #did not handle variable numbers of spaces well
 #[keep_ligands, bio_ligands, all_ligands, nst_ligands]

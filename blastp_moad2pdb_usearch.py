@@ -96,7 +96,7 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
     # see https://biopython.org/docs/1.75/api/Bio.Blast.Record.html for documentation
 
     #print(dir(blast_record)) #print a list of the record's contents
-    
+
     #for each structure aligned to the moad structure
     for alignment in blast_record.alignments:
 
@@ -112,7 +112,7 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
             entries = re.split("pdb\||>pdb\|", alignment.title) #separate out all pdb files with a given sequence
             pdb_ids = [title[0:4] for title in entries[1:]] #the first entry is "" from the left of the first pdb| header
             #print(len(pdb_ids))
-            pdb_ids = [i for i in pdb_ids if i.upper() in structures]
+            #pdb_ids = [i for i in pdb_ids if i.upper() in structures] #<
             #print(len(pdb_ids))
             #print("#########################################################################")
 
@@ -137,11 +137,13 @@ for i in open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_ne
     hits_all += hits
     hits_alldata.append([i, hits, len(hits)])
 
+    print(len(hits))
+
     print(hits)
 
 hits_alldata.sort(key = lambda x: x[2], reverse=True)
 
-serial = 9 #<-- keep updated
+serial = 10 #<-- keep updated
 np.save(f"/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles/blast_output_v{serial}", hits_alldata)
 
 print(hits_alldata)
