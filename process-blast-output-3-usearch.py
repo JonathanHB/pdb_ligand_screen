@@ -14,14 +14,16 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_nega
 #moad file directory
 blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pockets/iofiles"
 #serial number of the blast output file to load
-serial_in = 6 #this is up to date for things containing apo structures
+serial_in = 10 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
 align = True
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 #used to distinguish different versions of the results
 #(i.e. results computed with different cluster sequence identity cutoffs)
-serial_out = 2
+serial_out = 3
+#folder to keep output organized
+output_dir = f"{directory}/processed-blast-v{serial_out}"
 
 #load BLAST hits and pull out the set of interest
 blasthits = np.load(f"{directory}/blast_output_v{serial_in}.npy")
@@ -45,7 +47,7 @@ def generate_msa(trajectories, protein_names, centroid_id, version='new'):
     #check for selenocysteine here
 
     input_sequences = {}
-    with open(f'{centroid_id}-alignment.fasta', 'w') as f:
+    with open(f'{output_dir}/{centroid_id}-alignment.fasta', 'w') as f:
         for p, pdb in zip(protein_names, trajectories):
             prot = Protein(
                 ''.join(r.code for r in pdb.top.residues if r.code),
@@ -56,13 +58,13 @@ def generate_msa(trajectories, protein_names, centroid_id, version='new'):
     muscledir = "/project/bowmore/ameller/"
 
     if version == 'old': #deprecated; could be removed
-        os.system(f'{muscledir}muscle -in alignment.fasta -out alignment-aligned.fasta')
-        os.system(f'{muscledir}muscle -refine -in alignment-aligned.fasta -out alignment-refined.fasta')
-        msa = TabularMSA.read('alignment-refined.fasta',
+        os.system(f'{muscledir}muscle -in {output_dir}/alignment.fasta -out {output_dir}/alignment-aligned.fasta')
+        os.system(f'{muscledir}muscle -refine -in {output_dir}/alignment-aligned.fasta -out {output_dir}/alignment-refined.fasta')
+        msa = TabularMSA.read(f'{output_dir}/alignment-refined.fasta',
                               constructor=Protein)
     else:
-        os.system(f'{muscledir}muscle -align {centroid_id}-alignment.fasta -output {centroid_id}-alignment-aligned.fasta')
-        msa = TabularMSA.read(f'{centroid_id}-alignment-aligned.fasta', constructor=Protein)
+        os.system(f'{muscledir}muscle -align {output_dir}/{centroid_id}-alignment.fasta -output {output_dir}/{centroid_id}-alignment-aligned.fasta')
+        msa = TabularMSA.read(f'{output_dir}/{centroid_id}-alignment-aligned.fasta', constructor=Protein)
 
     msa.reassign_index(minter='id')
 
@@ -229,14 +231,14 @@ for testindex in range(0, len(blasthits)):
             #download the protein structure, skip further processing if this fails
             if getstruct(prot, existing_pdbids) != False:
 
-                try: #<----what is this try/except for??
+                try:
                     xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
                     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
 
                     xtal_aligned.append(xtal_0)
                     prot_aligned.append(prot)
                 except:
-                    print(f"error loading {prot}")
+                    print(f"error loading {prot}; investigate manually")
 
         #throw out clusters with no valid structures
         if len(prot_aligned) == 0:
@@ -252,10 +254,10 @@ for testindex in range(0, len(blasthits)):
          f"msa":msagen[2]}
 
         for e in savedict.keys():
-            with open(f"{testprots[0]}-v{serial_out}-{e}", "wb") as output_file:
+            with open(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", "wb") as output_file:
                 pickle.dump(savedict[e], output_file)
 
-        np.save(f"{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
+        np.save(f"{output_dir}/{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
 
         #separate the returned objects for further processing
         pdb2msa = msagen[0]
@@ -264,13 +266,13 @@ for testindex in range(0, len(blasthits)):
     #load the results of a saved msa
     else:
 
-        with open(f"{testprots[0]}-v{serial_out}-pdb2msa", 'rb') as pickle_file:
+        with open(f"{output_dir}/{testprots[0]}-v{serial_out}-pdb2msa", 'rb') as pickle_file:
             pdb2msa = pickle.load(pickle_file)
 
-        with open(f"{testprots[0]}-v{serial_out}-msa2rind", 'rb') as pickle_file:
+        with open(f"{output_dir}/{testprots[0]}-v{serial_out}-msa2rind", 'rb') as pickle_file:
             msa2rind = pickle.load(pickle_file)
 
-        prot_aligned = np.load(f"{testprots[0]}-v{serial_out}-aligned-proteins.npy")
+        prot_aligned = np.load(f"{output_dir}/{testprots[0]}-v{serial_out}-aligned-proteins.npy")
 
     #------------------------------------------------muscle msa end-------------------------------------
 
@@ -303,7 +305,7 @@ for testindex in range(0, len(blasthits)):
     all_moad_ligands = []
 
     #track the fraction of proteins which are monomers
-    physio_monomers = 0
+    physio_monomer = 0
 
     #loop through all proteins collected by BLAST and included in the MSA
     for x, prot in enumerate(prot_aligned):
@@ -332,12 +334,11 @@ for testindex in range(0, len(blasthits)):
         #noncanonical residues
         prot_resns_noncanonical = [i for i in prot_resns if i not in aa_resns]
 
-        #check if the protein has noncanonical residues other than one n-terminal acetyl group
-        if len(prot_resns_noncanonical > 0) or (len(prot_resns_noncanonical) == 1 and str(xtal.top.residue(0))[0:3] == "ACE"):
-            print("heresy alert: skipping protein due to noncanonical residues:")
+        #check if the protein has noncanonical residues other than one n-terminal acetyl group, which is handled below
+        if len(prot_resns_noncanonical) > 0 and not (len(prot_resns_noncanonical) == 1 and str(xtal.top.residue(0))[0:3] == "ACE"):
+            print("skipping protein due to noncanonical residues:")
             print(prot_resns_noncanonical)
             continue
-
 
         protein_canonical.append(prot)
 
@@ -393,7 +394,7 @@ for testindex in range(0, len(blasthits)):
         else:
             #print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
 
-            prot_apo.append(prot)
+            #prot_apo.append(prot)
 
             lining_resis_byprot[prot] = []
             lining_resis_byprot_msa[prot] = []
@@ -414,20 +415,24 @@ for testindex in range(0, len(blasthits)):
 
     #-------------------------------oligomerization info--------------------------------------------
 
-    multimer_summary = [all_loadable, physio_monomer, physio_monomer/all_loadable]
+    n_canon = len(protein_canonical)
+    multimer_summary = [n_canon, physio_monomer, physio_monomer/n_canon]
 
     #-------------------------------ligand composition and uniqueness-------------------------------
 
     ligand_summary = [all_moad_ligands, len(all_moad_ligands), len(np.unique(all_moad_ligands)), len(np.unique(all_moad_ligands))/len(all_moad_ligands)]
 
-    #-------------------------------positive examples for training----------------------------------
+    #-------------------------------positive examples projected onto monomers for training----------------------------------
 
     #get the mdtraj residue indices of positive residues for each protein from the MSA
-    resids_byprot_p = []
+    resids_byprot_p = {}
 
-    for x, prot in enumerate(prot_aligned):
+    prot_monomer = prot_apo_monomer+prot_holo_monomer
+    print(prot_monomer)
+
+    for x, prot in enumerate(prot_monomer):
         lining_resids_prot = [msa2rind[prot][e] for e in lining_resis_all_msa if e in msa2rind[prot]]
-        resids_byprot_p.append([prot, lining_resids_prot])
+        resids_byprot_p[prot] = [prot, lining_resids_prot]
 
     #-------------------------------negative examples projected onto for validation and testing--------------------
 
@@ -437,15 +442,15 @@ for testindex in range(0, len(blasthits)):
     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
 
     #calculate pdb resseqs of ligand-lining residues for pymol display
-    output_rseqs_p = [xtal_0.top.residue(i).resSeq for i in lining_resis_all]
-    output_rseqs_n = [
+    ref_rseqs_p = [xtal_0.top.residue(i).resSeq for i in lining_resis_all]
+    ref_rseqs_n = [
         r.resSeq
         for r in xtal_0.top.residues
         if r.index not in lining_resis_all and r.is_protein
     ]
 
     #calculate indices of negative resiudes in reference structure
-    output_resid_n = [
+    ref_resid_n = [
         r.index
         for r in xtal_0.top.residues
         if r.index not in lining_resis_all and r.is_protein
@@ -455,30 +460,36 @@ for testindex in range(0, len(blasthits)):
 
     #variables to save and variable-specific filenames
     savedict = {
-     "holo-proteins":prot_holo,
+    #lists of proteins in different categories;
+    #apo and holo are mutually exclusive subsets of canonical, which is a subset of holo
+     "aligned-proteins":prot_aligned,
      "canonical-proteins":protein_canonical,
      "holo-monomer":prot_holo_monomer,
      "apo-monomer":prot_apo_monomer,
+    #the ligand-lining residues, projected onto the reference structure and msa respectively
+    #"byprot" versions contain a dictionary of residues next to the ligand in each protein and
+    #"all" versions contain a list of all residues next to a ligand in any protein in the cluster
      "lining-resis-byprot":lining_resis_byprot,
      "lining-resis-byprot":lining_resis_byprot_msa,
      "lining-resis-all":lining_resis_all,
      "lining-resis-all_msa":lining_resis_all_msa,
-     "rseqs-positive_cent":centroid_rseqs_p,
-     "rseqs-negative_cent":centroid_rseqs_n,
-     "resid-negative_cent":centroid_resid_n,
-     "rseqs-positive_apos":output_rseqs_p,
-     "rseqs-negative_apos":output_rseqs_n,
-     "resid-negative_apos":output_resid_n,
+    #positive and negative resseqs and negative resids projected onto the reference protein
+    #positive resids are saved as lining_resis_all (see above)
+     "rseqs-positive_ref":ref_rseqs_p,
+     "rseqs-negative_ref":ref_rseqs_n,
+     "resid-negative_ref":ref_resid_n,
+    #list of positive resids for all monomeric proteins
      "resid-positive-byprot":resids_byprot_p,
-
+    #list of valid MOAD ligands and information about the fraction of unique ligands
      f"ligand-summary":ligand_summary,
+    #information about the fraction of proteins which are multimers
      f"multimer-summary":multimer_summary}
 
     for e in savedict.keys():
-        np.save(f"{testprots[0]}-v{serial_out}-{e}", savedict[e])
+        np.save(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", savedict[e])
 
     #print negative residues for manual inspection
-    print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in output_rseqs_n)}\n")
+    print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in ref_rseqs_n)}\n")
 
 ################################################################################
 #                               things to try
@@ -494,6 +505,9 @@ for testindex in range(0, len(blasthits)):
 #                                 trimmings
 #------------------------------------------------------------------------------#
 
+#     "rseqs-positive_apos":output_rseqs_p,
+#     "rseqs-negative_apos":output_rseqs_n,
+#     "resid-negative_apos":output_resid_n,
 
         #indices of residues which are of biological interest (not in the list above)
         #ligand_nonaq_indices = [x for x, i in enumerate(ligand_resns) if i not in solvent]
