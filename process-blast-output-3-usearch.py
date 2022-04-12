@@ -5,6 +5,7 @@ import os
 import csv
 import pickle
 import re
+import csv
 
 import mdtraj as md
 from skbio import Protein, TabularMSA
@@ -16,7 +17,7 @@ blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new
 #serial number of the blast output file to load
 serial_in = 10 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
-align = True
+align = False
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 #used to distinguish different versions of the results
@@ -28,6 +29,12 @@ output_dir = f"{directory}/processed-blast-v{serial_out}"
 #load BLAST hits and pull out the set of interest
 blasthits = np.load(f"{directory}/blast_output_v{serial_in}.npy")
 
+#canonical residues reference
+aa_resns = ["ASN", "ASP", "GLN", "GLU", "THR",
+            "SER", "LYS", "ARG", "HIS", "PRO",
+            "GLY", "CYS", "MET", "ALA", "VAL",
+            "LEU", "ILE", "PHE", "TYR", "TRP",
+            "SEC", "MSE"]
 
 #-----------------------------------MUSCLE multiple sequence alignment code from Artur-----------------------------------#
 #import this if possible rather than copying it here; imports
@@ -117,7 +124,29 @@ def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
     #construct ligand selection query
     molecule_queries = []
     for x, e in enumerate(ligand_resns):
-        molecule_queries.append(f"(resname '{e}' and resSeq {ligand_rseqs[x]})")
+
+        #normal 1-residue ligands
+        if len(e.split(" ")) == 1:
+            molecule_queries.append(f"(resname '{e}' and resSeq {ligand_rseqs[x]})")
+
+        #composite multi-residue ligands for which MOAD does not provide adequate residue numbers
+        else:
+            print(e)
+            for resi in e.split(" "): #split moad contents into residues
+                if resi not in aa_resns:
+                    print(resi)
+                    molecule_queries.append(f"resname '{resi}'")
+                else:
+                    print(f"amino acid residue {resi} detected in composite ligand; \
+                          cannot include in query due to the lack of adequate residue indices from mdtraj")
+
+            #print("||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||")
+            #print(ligand_resns)
+            #print(ligand_rseqs)
+
+    if len(molecule_queries) == 0:
+        print("no valid ligands found")
+        return False
 
     ligand_select_str = " or ".join(molecule_queries)
 
@@ -187,7 +216,7 @@ def checkoligomerization(pdbid):
                 print(f"skipping {asm_type} assembly")
                 return False
             else:
-                print(asm_type)
+                #print(asm_type)
                 return True
 
         elif look_for_mer and not (line[0:52] == "REMARK 350 SOFTWARE DETERMINED QUATERNARY STRUCTURE:" and author_found):
@@ -248,14 +277,14 @@ for testindex in range(0, len(blasthits)):
         #generate and save the msa
         msagen = generate_msa(xtal_aligned, prot_aligned, testprots[0])
 
-        savedict = {
+        savedict_pickle_1 = {
          f"pdb2msa":msagen[0],
          f"msa2rind":msagen[1],
          f"msa":msagen[2]}
 
-        for e in savedict.keys():
+        for e in savedict_pickle_1.keys():
             with open(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", "wb") as output_file:
-                pickle.dump(savedict[e], output_file)
+                pickle.dump(savedict_pickle_1[e], output_file)
 
         np.save(f"{output_dir}/{testprots[0]}-v{serial_out}-aligned-proteins", prot_aligned)
 
@@ -347,7 +376,9 @@ for testindex in range(0, len(blasthits)):
         moad_resns = [i[0] for i in moad_ligands]
         moad_rseqs = [int(i[2]) for i in moad_ligands]
 
-        all_moad_ligands.append(moad_resns)
+        all_moad_ligands += moad_resns
+
+        peptideligandonly = False
 
         #skip structures with no ligands of interest
         if moad_ligands != []:
@@ -355,43 +386,50 @@ for testindex in range(0, len(blasthits)):
             #get the residues within cutoff distance of the ligand
             lining_rseqs_resis = getcoordresseqs_moad(xtal, moad_resns, moad_rseqs)
 
-            #separate the returned objects for further processing
-            lining_rseqs = lining_rseqs_resis[0] #rcsb pdb numbers
-            lining_resis = lining_rseqs_resis[1] #mdtraj residue indices
+            #handle cases where the ligands turn out to be peptides,
+            #in which case MOAD does not supply reliable numbering
+            if lining_rseqs_resis != False:
 
-            #acetylated n-termini cause off-by-one errors when converting residue
-            #numbering using the multiple sequence alignment. This if statement
-            #detects them and adjusts the numbering by 1 to correct this
-            if str(xtal.top.residue(0))[0:3] == "ACE":
-                print("shifting residue numbering by one to correct for N-terminal acetylation")
-                lining_resis = [i+1 for i in lining_resis]
+                #separate the returned objects for further processing
+                lining_rseqs = lining_rseqs_resis[0] #rcsb pdb numbers
+                lining_resis = lining_rseqs_resis[1] #mdtraj residue indices
 
-            #convert indices using msa
+                #acetylated n-termini cause off-by-one errors when converting residue
+                #numbering using the multiple sequence alignment. This if statement
+                #detects them and adjusts the numbering by 1 to correct this
+                if str(xtal.top.residue(0))[0:3] == "ACE":
+                    print("shifting residue numbering by one to correct for N-terminal acetylation")
+                    lining_resis = [i+1 for i in lining_resis]
 
-            #get the indices of the lining residues in the msa
-            lining_aligned_msa = [pdb2msa[prot][i] for i in lining_resis if i in pdb2msa[prot]]
+                #convert indices using msa
 
-            #get the indices of the lining residues in the reference structure
-            #these are the mdtraj indices
-            lining_aligned = [msa2rind[refprot][pdb2msa[prot][i]] for i in lining_resis
-                              if (i in pdb2msa[prot] and pdb2msa[prot][i] in msa2rind[refprot])]
+                #get the indices of the lining residues in the msa
+                lining_aligned_msa = [pdb2msa[prot][i] for i in lining_resis if i in pdb2msa[prot]]
 
-            #append indices for output
-            #reference structure indices
-            lining_resis_all += lining_aligned
-            lining_resis_byprot[prot] = lining_aligned
-            #msa indices
-            lining_resis_all_msa += lining_aligned_msa
-            lining_resis_byprot_msa[prot] = lining_aligned_msa
+                #get the indices of the lining residues in the reference structure
+                #these are the mdtraj indices
+                lining_aligned = [msa2rind[refprot][pdb2msa[prot][i]] for i in lining_resis
+                                  if (i in pdb2msa[prot] and pdb2msa[prot][i] in msa2rind[refprot])]
 
-            if checkoligomerization(prot):
-                physio_monomer+=1
-                prot_holo_monomer.append(prot)
+                #append indices for output
+                #reference structure indices
+                lining_resis_all += lining_aligned
+                lining_resis_byprot[prot] = lining_aligned
+                #msa indices
+                lining_resis_all_msa += lining_aligned_msa
+                lining_resis_byprot_msa[prot] = lining_aligned_msa
+
+                if checkoligomerization(prot):
+                    physio_monomer+=1
+                    prot_holo_monomer.append(prot)
+                else:
+                    prot_holo_multimer.append(prot)
+
             else:
-                prot_holo_multimer.append(prot)
+                peptideligandonly = True
 
         #append empty arrays for structures with no ligands of interest
-        else:
+        if moad_ligands == [] or peptideligandonly == True:
             #print("apo structure found, indicating filtering error; please inspect-------------------------------------------------")
 
             #prot_apo.append(prot)
@@ -458,19 +496,30 @@ for testindex in range(0, len(blasthits)):
 
     #--------------------------------save results---------------------------------------------------
 
+    savedict_pickle_2 = {
+    #the ligand-lining residues, projected onto the reference structure and msa respectively
+    #"byprot" versions contain a dictionary of residues next to the ligand in each protein
+     "lining-resis-byprot":lining_resis_byprot,
+     "lining-resis-byprot":lining_resis_byprot_msa,
+    #list of positive resids for all monomeric proteins
+     "resid-positive-byprot":resids_byprot_p}
+
+    for e in savedict_pickle_2.keys():
+        with open(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", "wb") as output_file:
+            pickle.dump(savedict_pickle_2[e], output_file)
+
     #variables to save and variable-specific filenames
-    savedict = {
+    savedict_npy = {
     #lists of proteins in different categories;
     #apo and holo are mutually exclusive subsets of canonical, which is a subset of holo
      "aligned-proteins":prot_aligned,
      "canonical-proteins":protein_canonical,
      "holo-monomer":prot_holo_monomer,
      "apo-monomer":prot_apo_monomer,
+     "holo-multimer":prot_holo_multimer,
+     "apo-multimer":prot_apo_multimer,
     #the ligand-lining residues, projected onto the reference structure and msa respectively
-    #"byprot" versions contain a dictionary of residues next to the ligand in each protein and
     #"all" versions contain a list of all residues next to a ligand in any protein in the cluster
-     "lining-resis-byprot":lining_resis_byprot,
-     "lining-resis-byprot":lining_resis_byprot_msa,
      "lining-resis-all":lining_resis_all,
      "lining-resis-all_msa":lining_resis_all_msa,
     #positive and negative resseqs and negative resids projected onto the reference protein
@@ -478,15 +527,31 @@ for testindex in range(0, len(blasthits)):
      "rseqs-positive_ref":ref_rseqs_p,
      "rseqs-negative_ref":ref_rseqs_n,
      "resid-negative_ref":ref_resid_n,
-    #list of positive resids for all monomeric proteins
-     "resid-positive-byprot":resids_byprot_p,
     #list of valid MOAD ligands and information about the fraction of unique ligands
      f"ligand-summary":ligand_summary,
     #information about the fraction of proteins which are multimers
      f"multimer-summary":multimer_summary}
 
-    for e in savedict.keys():
-        np.save(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", savedict[e])
+    for e in savedict_npy.keys():
+        np.save(f"{output_dir}/{testprots[0]}-v{serial_out}-{e}", savedict_npy[e])
+
+    #save csv output
+    with open(f'{output_dir}/usearch-v{serial_out}-negatives.csv', 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile, delimiter=',')
+
+        #centroid, usearch index, reference protein, number of aligned proteins,
+        writer.writerow([testprots[0], testindex, refprot, len(prot_aligned),
+        # number of aligned proteins with only canonical residues, number of holo proteins,
+        len(protein_canonical), len(prot_holo_monomer)+len(prot_holo_multimer),
+        # fraction of physiological monomers among canonical proteins
+        (len(prot_holo_monomer)+len(prot_holo_monomer))/(len(protein_canonical)),
+        #number of moad ligands, number of unique moad ligands,
+        len(all_moad_ligands), len(np.unique(all_moad_ligands)),
+        #length of reference protein, number of negative residues,
+        len(ref_rseqs_p)+len(ref_rseqs_n), len(ref_rseqs_n),
+        #format negatives for visualization
+        "+".join(str(i) for i in ref_rseqs_n)
+        ])
 
     #print negative residues for manual inspection
     print(f"resseqs of negative residues in pdb id {testprots[0]}: {'+'.join(str(i) for i in ref_rseqs_n)}\n")
