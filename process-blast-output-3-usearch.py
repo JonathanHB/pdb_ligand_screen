@@ -17,7 +17,7 @@ blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new
 #serial number of the blast output file to load
 serial_in = 10 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
-align = False
+align = True
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 #used to distinguish different versions of the results
@@ -59,6 +59,9 @@ def generate_msa(trajectories, protein_names, centroid_id, version='new'):
             prot = Protein(
                 ''.join(r.code for r in pdb.top.residues if r.code),
                 metadata={'id': p})
+
+            #print(p)
+            #print(''.join(r.code for r in pdb.top.residues if r.code))
             prot.write(f, format='fasta')
             input_sequences[p] = str(prot)
 
@@ -131,14 +134,14 @@ def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
 
         #composite multi-residue ligands for which MOAD does not provide adequate residue numbers
         else:
-            print(e)
+            #print(e)
             for resi in e.split(" "): #split moad contents into residues
                 if resi not in aa_resns:
-                    print(resi)
+                    #print(resi)
                     molecule_queries.append(f"resname '{resi}'")
                 else:
                     print(f"amino acid residue {resi} detected in composite ligand; \
-                          cannot include in query due to the lack of adequate residue indices from mdtraj")
+                          cannot include in query due to the lack of adequate residue indices from moad")
 
             #print("||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||")
             #print(ligand_resns)
@@ -237,7 +240,11 @@ def checkoligomerization(pdbid):
 existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")] #get a list of already-downloaded ligand lists to avoid downloading extra copies
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
-for testindex in range(0, len(blasthits)):
+#usearch cluster indices (sorted by descending size) to process
+start = 24
+stop = len(blasthits)
+
+for testindex in range(start, stop):
     testprots = blasthits[testindex]
     print("===============================================================================")
     print(f"cluster {testindex}, centroid {testprots[0]}")
@@ -260,9 +267,19 @@ for testindex in range(0, len(blasthits)):
             #download the protein structure, skip further processing if this fails
             if getstruct(prot, existing_pdbids) != False:
 
+                #excluded_na_complexes = ["1T0K", "6DKS"]
+                #if prot in excluded_na_complexes:
+                #    print(f"skipping {prot}, which has RNA as the first chain")
+                #    continue
+
                 try:
                     xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
                     xtal_0 = xtal.atom_slice(xtal.top.select("chainid 0"))
+
+                    #skip protein-na complexes stating with na chains
+                    if [r.code for r in xtal_0.top.residues if r.code] == []:
+                        print(f"skipping {prot}, which is probably a protein-nucleic acid complex with a nucleic acid as the first chain")
+                        continue
 
                     xtal_aligned.append(xtal_0)
                     prot_aligned.append(prot)
@@ -521,12 +538,12 @@ for testindex in range(0, len(blasthits)):
     #the ligand-lining residues, projected onto the reference structure and msa respectively
     #"all" versions contain a list of all residues next to a ligand in any protein in the cluster
      "lining-resis-all":lining_resis_all,
-     "lining-resis-all_msa":lining_resis_all_msa,
+     "lining-resis-all-msa":lining_resis_all_msa,
     #positive and negative resseqs and negative resids projected onto the reference protein
     #positive resids are saved as lining_resis_all (see above)
-     "rseqs-positive_ref":ref_rseqs_p,
-     "rseqs-negative_ref":ref_rseqs_n,
-     "resid-negative_ref":ref_resid_n,
+     "rseqs-positive-ref":ref_rseqs_p,
+     "rseqs-negative-ref":ref_rseqs_n,
+     "resid-negative-ref":ref_resid_n,
     #list of valid MOAD ligands and information about the fraction of unique ligands
      f"ligand-summary":ligand_summary,
     #information about the fraction of proteins which are multimers
@@ -544,7 +561,7 @@ for testindex in range(0, len(blasthits)):
         # number of aligned proteins with only canonical residues, number of holo proteins,
         len(protein_canonical), len(prot_holo_monomer)+len(prot_holo_multimer),
         # fraction of physiological monomers among canonical proteins
-        (len(prot_holo_monomer)+len(prot_holo_monomer))/(len(protein_canonical)),
+        (len(prot_holo_monomer)+len(prot_apo_monomer))/len(protein_canonical),
         #number of moad ligands, number of unique moad ligands,
         len(all_moad_ligands), len(np.unique(all_moad_ligands)),
         #length of reference protein, number of negative residues,
@@ -569,30 +586,3 @@ for testindex in range(0, len(blasthits)):
 ################################################################################
 #                                 trimmings
 #------------------------------------------------------------------------------#
-
-#     "rseqs-positive_apos":output_rseqs_p,
-#     "rseqs-negative_apos":output_rseqs_n,
-#     "resid-negative_apos":output_resid_n,
-
-        #indices of residues which are of biological interest (not in the list above)
-        #ligand_nonaq_indices = [x for x, i in enumerate(ligand_resns) if i not in solvent]
-
-     #f"aligned-proteins":prot_aligned, #already saved
-
-
-"""
-            #acetylated n-termini cause off-by-one errors when converting residue
-            #numbering using the multiple sequence alignment. This if statement
-            #detects them and adjusts the numbering by 1 to correct this
-            if str(xtal.top.residue(0))[0:3] == "ACE":
-                print("shifting residue numbering by one to correct for N-terminal acetylation")
-                lining_resis = [i+1 for i in lining_resis]
-"""
-
- # {biomolecule+1} #did not handle variable numbers of spaces well
-#[keep_ligands, bio_ligands, all_ligands, nst_ligands]
-
-# lining_resis_byprot.append([-999]) #-999 is there to distinguish multimers from aligned structures with no MOAD ligands
-
-#the index of the protein set in the blast file to use; deprecated due to loop
-#testindex = 0
