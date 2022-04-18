@@ -44,6 +44,13 @@ aa_resns = ["ASN", "ASP", "GLN", "GLU", "THR",
 #import numpy as np
 #from skbio import Protein, TabularMSA
 
+#convert selenocysteine to selenocysteine for alignment
+def u2c(char):
+    if char != 'U':
+        return char
+    else:
+        return 'C'
+
 def generate_msa(trajectories, protein_names, centroid_id, version='new'):
     '''
         trajectories : mdtraj trajectories for which you wish to do the sequence alignment.
@@ -51,13 +58,22 @@ def generate_msa(trajectories, protein_names, centroid_id, version='new'):
 
     '''
 
-    #check for selenocysteine here
+    #check for selenocysteine and other noncanonical residues which cause the MSA to crash
+
+    #valid 1 letter characters:
+    oneletter = ['A', 'G', 'S', 'H', 'N', '*', 'K', 'D', 'B', 'R', 'I', 'L', 'E', 'Q', 'C', 'V', 'W', 'M', '.', 'F', 'Y', 'X', 'T', '-', 'P', 'Z']
 
     input_sequences = {}
     with open(f'{output_dir}/{centroid_id}-alignment.fasta', 'w') as f:
         for p, pdb in zip(protein_names, trajectories):
+
+            #for debugging any additional noncanonical residues should any arise
+            #if len([r.code for r in pdb.top.residues if r.code and r.code not in oneletter]) > 0:
+            #    print([r.code for r in pdb.top.residues if r.code and r.code])
+            #    print([u2c(r.code) for r in pdb.top.residues if r.code and r.code])
+
             prot = Protein(
-                ''.join(r.code for r in pdb.top.residues if r.code),
+                ''.join(u2c(r.code) for r in pdb.top.residues if r.code),
                 metadata={'id': p})
 
             #print(p)
@@ -241,7 +257,7 @@ existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 #usearch cluster indices (sorted by descending size) to process
-start = 24
+start = 53
 stop = len(blasthits)
 
 for testindex in range(start, stop):

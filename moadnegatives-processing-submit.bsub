@@ -1,0 +1,14 @@
+#!/bin/sh
+#BSUB -q bowman
+#BSUB -W 120:00
+#BSUB -R "span[ptile=1]"
+#BSUB -J findpairs
+#BSUB -o moad-negatives-%J.log
+#BSUB -e moad-negatives-%J.log
+
+#this script is submitted manually
+
+source /project/bowmore/borowsky.jonathan/anaconda3/bin/activate
+conda activate snakes
+
+python /project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/scripts/process-blast-output-3-usearch.py
