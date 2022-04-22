@@ -17,7 +17,7 @@ blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new
 #serial number of the blast output file to load
 serial_in = 10 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
-align = True
+align = False
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 #used to distinguish different versions of the results
@@ -257,7 +257,7 @@ existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 #usearch cluster indices (sorted by descending size) to process
-start = 53
+start = 0
 stop = len(blasthits)
 
 for testindex in range(start, stop):
@@ -385,7 +385,19 @@ for testindex in range(start, stop):
 
         #get the residues of the first mdtraj chain, which should be protein
         #this is not robust against weird chain orderings
-        proteinresidues = [[j for j in i.residues] for i in xtal.top.chains][0]
+
+        protein_atoms = list(xtal.top.select("protein"))
+        #print(protein_atoms)
+
+        #testa = xtal.top.chains[0]
+        #print([j for j in i.residues if (j.atom(0) in protein_atoms)])
+
+        #print([[j.atom(0).index for j in i.residues] for i in xtal.top.chains][0])
+
+        proteinresidues = [j for i in xtal.top.chains for j in i.residues if (j.atom(0).index in protein_atoms)]
+
+        #proteinresidues = [r for r in sublist for sublist in proteinresidues_ll]
+        #print(proteinresidues)
 
         #full residue names
         residues = [str(i) for i in proteinresidues]
@@ -487,19 +499,32 @@ for testindex in range(start, stop):
     #-------------------------------oligomerization info--------------------------------------------
 
     n_canon = len(protein_canonical)
-    multimer_summary = [n_canon, physio_monomer, physio_monomer/n_canon]
+
+    if n_canon != 0:
+        multimer_summary = [n_canon, physio_monomer, physio_monomer/n_canon]
+        monomer_fraction = physio_monomer/n_canon
+    else:
+        print("No canonical proteins found; all otherwise-valid proteins have noncanonical residues. Returning -1 in place of division by 0")
+        multimer_summary = [n_canon, physio_monomer, -1]
+        monomer_fraction = -1
 
     #-------------------------------ligand composition and uniqueness-------------------------------
 
-    ligand_summary = [all_moad_ligands, len(all_moad_ligands), len(np.unique(all_moad_ligands)), len(np.unique(all_moad_ligands))/len(all_moad_ligands)]
+    n_moadlig = len(all_moad_ligands)
+
+    if n_moadlig != 0:
+        ligand_summary = [all_moad_ligands, n_moadlig, len(np.unique(all_moad_ligands)), len(np.unique(all_moad_ligands))/n_moadlig]
+    else:
+        print("no MOAD ligands found in otherwise-valid proteins. Returning -1 in place of division by 0")
+        ligand_summary = [all_moad_ligands, n_moadlig, len(np.unique(all_moad_ligands)), -1]
 
     #-------------------------------positive examples projected onto monomers for training----------------------------------
 
     #get the mdtraj residue indices of positive residues for each protein from the MSA
     resids_byprot_p = {}
 
-    prot_monomer = prot_apo_monomer+prot_holo_monomer
-    print(prot_monomer)
+    prot_monomer = prot_apo_monomer + prot_holo_monomer #not redundant with the integer physio_monomer
+    print(physio_monomer)
 
     for x, prot in enumerate(prot_monomer):
         lining_resids_prot = [msa2rind[prot][e] for e in lining_resis_all_msa if e in msa2rind[prot]]
@@ -577,7 +602,7 @@ for testindex in range(start, stop):
         # number of aligned proteins with only canonical residues, number of holo proteins,
         len(protein_canonical), len(prot_holo_monomer)+len(prot_holo_multimer),
         # fraction of physiological monomers among canonical proteins
-        (len(prot_holo_monomer)+len(prot_apo_monomer))/len(protein_canonical),
+        monomer_fraction,
         #number of moad ligands, number of unique moad ligands,
         len(all_moad_ligands), len(np.unique(all_moad_ligands)),
         #length of reference protein, number of negative residues,

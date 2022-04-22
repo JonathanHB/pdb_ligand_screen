@@ -91,13 +91,15 @@ for x, prot1 in enumerate(proteins_all):
     fasta_seq1 = SeqIO.read(open(f"{fasta_dir}/{prot1}.fasta"),'fasta').seq
 
     for y, prot2 in enumerate(proteins_all[x+1:]):
-        
+
         fasta_seq2 = SeqIO.read(open(f"{fasta_dir}/{prot2}.fasta"),'fasta').seq
 
         #matrix = matlist.blosum62
         alignment = pairwise2.align.globalds(fasta_seq1, fasta_seq2, matlist.blosum62, -11, -1) #parameters matching blastp
         #setting d uses the matrix, s uses the gap creation and extension penalties
         #note that format_alignment() can be used to display alignments nicely as long as they aren't wider than the terminal
+
+        print(alignment)
 
         minlen = min(len(fasta_seq1), len(fasta_seq2))
         #use the shorter of the two sequences as the denominator to determine the percent identity
