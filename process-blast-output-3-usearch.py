@@ -20,9 +20,11 @@ serial_in = 10 #this is up to date for things containing apo structures
 align = False
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
+#serial number of alignment to load
+serial_aln = 3
 #used to distinguish different versions of the results
 #(i.e. results computed with different cluster sequence identity cutoffs)
-serial_out = 3
+serial_out = 4
 #folder to keep output organized
 output_dir = f"{directory}/processed-blast-v{serial_out}"
 
@@ -180,7 +182,49 @@ def getcoordresseqs_moad(xtal, ligand_resns, ligand_rseqs):
     lining_resids = np.unique([xtal.top.atom(i).residue.index for i in lining_ai])    #0-indices of the lining residues in the mdtraj structure
     lining_resseqs = np.unique([xtal.top.atom(i).residue.resSeq for i in lining_ai])  #rcsb pdb residue numbers of the lining residues
 
-    return [lining_resseqs, lining_resids]
+    #print([r.index for r in xtal.top.residues])
+
+    #for each resseq which lines a ligand in any chain, find the lowest numbered protein resid with that resseq
+    #lowest_numbered_resids = []
+    #for xrs, rs in enumerate(lining_resseqs):
+        #print(rs)
+        #if rs >= 0:
+        #    rs_atoms = xtal.top.select(f"resSeq {rs} and protein")
+        #    rs_resids = np.unique([xtal.top.atom(x).residue.index for x in rs_atoms])
+            #print(rs_resids)
+        #    lowest_numbered_resids.append(min(rs_resids))
+
+        #else: #handle negative resseqs that cause mdtraj to crash
+    #    for r in xtal.top.residues:
+    #        if r.resSeq == rs:
+    #            lowest_numbered_resids.append(r.index)
+    #            continue
+
+    lowest_numbered_resids = [min([r.index for r in xtal.top.residues if r.resSeq == rs]) for rs in lining_resseqs]
+
+    #print(len(lining_resseqs))
+    #print(len(lowest_numbered_resids))
+    #print(lining_resids)
+    #print("_--------------------_-------_--_---------")
+
+
+    #resseq_atoms = [xtal.top.select(f"resSeq {rs} and protein") for rs in lining_resseqs]
+    #resids
+    #lining_resids_chaina =
+
+    #debugging code
+
+    #print("pairs:")
+    #rrpairs = [[xtal.top.atom(i).residue.index, xtal.top.atom(i).residue.resSeq] for i in lining_ai]
+
+    #uniquepairs = []
+    #for rr in rrpairs:
+    #    if rr not in uniquepairs:
+    #        uniquepairs.append(rr)
+
+    #print(uniquepairs)
+
+    return [lining_resseqs, lowest_numbered_resids] #lining_resids
 
 #get biological ligands from MOAD
 def getligs(struct, chain=""):
@@ -257,8 +301,8 @@ existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 #usearch cluster indices (sorted by descending size) to process
-start = 0
-stop = len(blasthits)
+start = 5 #0
+stop = 6  #len(blasthits)
 
 for testindex in range(start, stop):
     testprots = blasthits[testindex]
@@ -328,13 +372,20 @@ for testindex in range(start, stop):
     #load the results of a saved msa
     else:
 
-        with open(f"{output_dir}/{testprots[0]}-v{serial_out}-pdb2msa", 'rb') as pickle_file:
+        if serial_aln == -1:
+            serial_load = serial_out
+        else:
+            serial_load = serial_aln
+
+        output_dir_aln = f"{directory}/processed-blast-v{serial_load}"
+
+        with open(f"{output_dir_aln}/{testprots[0]}-v{serial_load}-pdb2msa", 'rb') as pickle_file:
             pdb2msa = pickle.load(pickle_file)
 
-        with open(f"{output_dir}/{testprots[0]}-v{serial_out}-msa2rind", 'rb') as pickle_file:
+        with open(f"{output_dir_aln}/{testprots[0]}-v{serial_load}-msa2rind", 'rb') as pickle_file:
             msa2rind = pickle.load(pickle_file)
 
-        prot_aligned = np.load(f"{output_dir}/{testprots[0]}-v{serial_out}-aligned-proteins.npy")
+        prot_aligned = np.load(f"{output_dir_aln}/{testprots[0]}-v{serial_load}-aligned-proteins.npy")
 
     #------------------------------------------------muscle msa end-------------------------------------
 
@@ -372,7 +423,8 @@ for testindex in range(start, stop):
     #loop through all proteins collected by BLAST and included in the MSA
     for x, prot in enumerate(prot_aligned):
         print(f"{x}: {prot}")
-
+        #if prot != "3HVG":
+        #    continue
         xtal = md.load(f"{directory}/rcsb_pdb/{prot}.pdb")
 
         #skip proteins with nonstandard residues because these mess up the MSA
@@ -463,6 +515,19 @@ for testindex in range(start, stop):
                 #msa indices
                 lining_resis_all_msa += lining_aligned_msa
                 lining_resis_byprot_msa[prot] = lining_aligned_msa
+
+                #if prot == "3HVG":
+                #    print(lining_rseqs) #works
+                #    print(lining_resis) #looks sane enough
+                    #print(lining_aligned_msa)
+                    #print(lining_aligned)
+
+                #    lining_aligned_nonmsa = [i for i in lining_resis if i not in pdb2msa[prot]]
+                #    print(lining_aligned_nonmsa)
+
+                    #break
+                    #import sys
+                    #sys.exit(0)
 
                 if checkoligomerization(prot):
                     physio_monomer+=1
