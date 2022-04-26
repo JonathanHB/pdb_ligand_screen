@@ -301,8 +301,8 @@ existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 #usearch cluster indices (sorted by descending size) to process
-start = 5 #0
-stop = 6  #len(blasthits)
+start = 8 #0
+stop = 9 #len(blasthits)
 
 for testindex in range(start, stop):
     testprots = blasthits[testindex]
@@ -323,7 +323,8 @@ for testindex in range(start, stop):
         #loop through all proteins collected by BLAST
         for x, prot in enumerate(testprots[1]):
             print(f"{x}: {prot}")
-
+            #if prot != "6Q3Y":
+            #    continue
             #download the protein structure, skip further processing if this fails
             if getstruct(prot, existing_pdbids) != False:
 
@@ -515,6 +516,11 @@ for testindex in range(start, stop):
                 #msa indices
                 lining_resis_all_msa += lining_aligned_msa
                 lining_resis_byprot_msa[prot] = lining_aligned_msa
+
+                #if 152 in lining_rseqs:
+                #    print("caught")
+                #    import sys
+                #    sys.exit(0)
 
                 #if prot == "3HVG":
                 #    print(lining_rseqs) #works
