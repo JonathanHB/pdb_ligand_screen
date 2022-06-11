@@ -5,7 +5,7 @@ upperpath = "/home/jonathanb/mount"
 directory = f"{upperpath}/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles"
 
 serial = 4
-centroid='6CD4'
+centroid='1OIT'
 
 alphabet = list(string.ascii_uppercase)
 
@@ -34,5 +34,12 @@ for i in input:
                 break
 
 
-print(f"hide sticks, resn GOL+EDO+FMT+DMS or elem H; hide spheres, resn NA+CL+K+PO4+SO4+NO3; \
+#graphics settings and hiding highly soluble ligands
+print(f"hide sticks, resn GOL+EDO+FMT+DMS+ACT or elem H; hide spheres, resn NA+CL+K+PO4+SO4+NO3; \
 hide nonbonded; hide cartoon, not {centroid}; util.cbag; center {centroid}")
+
+#less soluble but still MOAD-invalid substances
+print("hide sticks, resn PEG+PGE+BU3")
+
+#more important ions
+print("hide spheres, resn CA+NI+IOD")

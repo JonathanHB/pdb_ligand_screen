@@ -15,21 +15,22 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_nega
 #moad file directory
 blast_directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pockets/iofiles"
 #serial number of the blast output file to load
-serial_in = 10 #this is up to date for things containing apo structures
+serial_in = 1 #this is up to date for things containing apo structures
 #whether to to MSA here or load a previously saved one
-align = False
+align = True
 #the distance below which ligands are considered adjacent to residues
 cutoff = 0.5
 #serial number of alignment to load
-serial_aln = 3
+serial_aln = -1
 #used to distinguish different versions of the results
 #(i.e. results computed with different cluster sequence identity cutoffs)
-serial_out = 4
+serial_out = "5p2"
 #folder to keep output organized
 output_dir = f"{directory}/processed-blast-v{serial_out}"
 
 #load BLAST hits and pull out the set of interest
-blasthits = np.load(f"{directory}/blast_output_v{serial_in}.npy")
+suffix = "nobreak_simonly" #leave empty elsewhere
+blasthits = np.load(f"{directory}/blast_output_v{serial_in}{suffix}.npy")
 
 #canonical residues reference
 aa_resns = ["ASN", "ASP", "GLN", "GLU", "THR",
@@ -301,8 +302,8 @@ existing_xids_moad = [i[0:4] for i in os.listdir(f"{blast_directory}/moad_xml/")
 existing_pdbids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_pdb/")]
 
 #usearch cluster indices (sorted by descending size) to process
-start = 8 #0
-stop = 9 #len(blasthits)
+start = 4
+stop = len(blasthits)
 
 for testindex in range(start, stop):
     testprots = blasthits[testindex]
@@ -597,7 +598,7 @@ for testindex in range(start, stop):
     prot_monomer = prot_apo_monomer + prot_holo_monomer #not redundant with the integer physio_monomer
     print(physio_monomer)
 
-    for x, prot in enumerate(prot_monomer):
+    for x, prot in enumerate(prot_monomer+prot_apo_multimer+prot_holo_multimer):
         lining_resids_prot = [msa2rind[prot][e] for e in lining_resis_all_msa if e in msa2rind[prot]]
         resids_byprot_p[prot] = [prot, lining_resids_prot]
 
@@ -629,7 +630,7 @@ for testindex in range(start, stop):
     #the ligand-lining residues, projected onto the reference structure and msa respectively
     #"byprot" versions contain a dictionary of residues next to the ligand in each protein
      "lining-resis-byprot":lining_resis_byprot,
-     "lining-resis-byprot":lining_resis_byprot_msa,
+     "lining-resis-byprot-msa":lining_resis_byprot_msa,
     #list of positive resids for all monomeric proteins
      "resid-positive-byprot":resids_byprot_p}
 

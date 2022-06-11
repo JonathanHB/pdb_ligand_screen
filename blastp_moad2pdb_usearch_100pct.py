@@ -34,7 +34,7 @@ directory = "/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/new_pocke
 
 part = "all" #part a or b or both ("all") of the MOAD database, which is broken in two on account of its large size
 
-idthresh = 0.90
+idthresh = 1.00
 
 #get the PDB IDs of all the MOAD structures
 structures = np.hstack([np.unique([i[0:4].upper() for i in os.listdir(f"{directory}/every_part_a/BindingMOAD_2020/")]), np.unique([i[0:4].upper() for i in os.listdir(f"{directory}/every_part_b/BindingMOAD_2020/")])])
@@ -46,23 +46,27 @@ existing_ids = [i[0:4] for i in os.listdir(f"{directory}/rcsb_fasta_{part}/")]
 hits_all = []
 hits_alldata = []
 
-#debugcounter = 0
+debugcounter = 0
+
+#carbonic anhydrase: '4PQ7'
+#brd4 bromodomain: '4KV1'
+
+protein = ['4KV1']
 
 #loop through centroid structures
-for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/centroid_pdb_ids_p90", 'r')):
+for i in protein: #open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/centroid_pdb_ids_p100", 'r'):
 #for i in structures:
 
-    print(i)
     i = i[0:4] #remove \n from each line
 
     print("-----------------------------------------------------------------------------")
-    print(x)
+    print(debugcounter)
     print(f"query: {i}")
 
     #if debugcounter > 200:
     #    print("done")
     #    break
-    #debugcounter+=1
+    debugcounter+=1
 
     if i in hits_all: #skip MOAD structures previously encountered as BLAST hits
         print("structure previously encountered as a BLAST hit; error")
@@ -89,11 +93,14 @@ for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein
     #The following can be used to read xml results for multimers, but further downstream adjustments would be required
     #  "blast_records = NCBIXML.parse(result_handle)
     #   blast_record = next(blast_records)"
+
     try:
         blast_record = NCBIXML.read(result_handle)
     except ValueError as err:
-        print(f"skipping query structure containing multiple sequences: {err}")
-        continue
+        print(f"processing first sequence in query structure containing multiple sequences' please inspect results: {err}")
+        blast_records = NCBIXML.parse(result_handle)
+        blast_record = next(blast_records)
+        #continue
     # see https://biopython.org/docs/1.75/api/Bio.Blast.Record.html for documentation
 
     #print(dir(blast_record)) #print a list of the record's contents
@@ -106,7 +113,7 @@ for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein
         #print(hsp)
 
         #check that there is one hsp with 100% identity and coverage
-        if len(alignment.hsps) == 1 and hsp.identities/hsp.align_length > idthresh: # == hsp.align_length and hsp.align_length == alignment.length:
+        if len(alignment.hsps) == 1 and hsp.identities/hsp.align_length >= idthresh: # == hsp.align_length and hsp.align_length == alignment.length:
             print(alignment)
             print(hsp.identities) #equals the others here by transitivity
 
@@ -120,6 +127,8 @@ for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein
 
             hits = hits+pdb_ids
         else:
+            print("insufficient identity")
+            print(hsp)
             #print(len(alignment.hsps))
             #print(hsp.identities/alignment.length)
             print(alignment.title)
@@ -127,10 +136,7 @@ for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein
             print(hsp.align_length)
             print(alignment.length)
 
-            #this heuristic turns out to be important for telling the difference between high-scoring alignments and low-scoring alignments
-            #but it's not the best way of doing that
-            break # <-- heuristic that assumes that once a nonidentical alignment is encountered none of the remainder are any good either
-            #there may be some legitimate proteins missed this way
+            #break # <-- heuristic that assumes that once a nonidentical alignment is encountered none of the remainder are any good either
 
             #print("---------------------")
             #print(hsp.identities)
@@ -145,12 +151,12 @@ for x, i in enumerate(open("/project/bowmanlab/borowsky.jonathan/FAST-cs/protein
 
     print(hits)
 
-    if x == 200:
-        break
+    #if debugcounter == 3:
+    #    break
 
 hits_alldata.sort(key = lambda x: x[2], reverse=True)
 
-serial = "1nobreak" #"100pct" #<-- keep updated
+serial = f"100pct-{protein[0]}" #<-- keep updated
 np.save(f"/project/bowmanlab/borowsky.jonathan/FAST-cs/protein-sets/moad_negatives/iofiles/blast_output_v{serial}", hits_alldata)
 
 print(hits_alldata)
